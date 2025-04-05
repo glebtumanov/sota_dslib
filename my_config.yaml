@@ -1,0 +1,91 @@
+common:
+    task: "binary" # binary, multi, regression
+    metrics:
+        - f1
+        - roc_auc
+        - "recall@k;k=0.01"
+        - "precision@k;k=0.01"
+        - "ap;average=micro" # average_precision_score
+        - "ap;average=weighted" # average_precision_score
+        - "f1;average=binary"
+    main_metric: roc_auc
+    model_dir: "/home/gleb/models" # пути сохранения обученных моделей
+    skip_cols: []
+    # k: 0.1 # топ доли наблюдений упорядоченных скоров по убыванию, на которой расчитывается метрика
+    # average: binary
+    selected_models:
+        - catboost
+        - lightgbm
+        - xgboost
+        - random_forest
+        - lightautoml
+
+split_data:
+    test_rate: 0.2
+    validation_rate: 0.2 # если не казан valid_path
+    binary_threshold: 0.5 # доля положительных классов относительно негативных
+    stratified_split: true # стратифицированное разбиение
+
+sampling: # начальное сэмплирование данных
+    use_sampling: true   # Если поставить false, то сэмплирование делать не будем
+    train_sample_size: 100000 # размер тренировочной выборки
+    validation_sample_size: 100000 # размер валидационной выборки
+    sample_seed: 42 # seed для сэмплирования
+    balanced_sampling: true # только для классификации
+    positive_rate: 0.5 # только для бинарной классификации
+
+train:
+    verbose: true
+    n_folds: 3 # количество фолдов для кросс-валидации
+
+columns:
+    all_features_file: "/home/gleb/artifacts_preprocessing/final_feature_list.txt"
+    category_features_file: "/home/gleb/artifacts_preprocessing/final_categorical_list.txt"
+    target_col: "target"
+    index_cols: ["epk_id"]
+
+data_source: # данные уже предобработаны и не содержат пропусков, категориальные признаки закодированы в целые числа
+    train_path: "/home/gleb/data/results/train_for_sota.parquet"
+    valid_path: "/home/gleb/data/results/test_for_sota.parquet"
+
+calibration:
+    use_calibration: true # калибровка модели (только для бинарной классификации)
+    calibration_type: "betacal" # betacal, isotonic
+
+# Настройки специфичные для каждой модели
+models:
+    catboost:
+        n_folds: 3
+        use_custom_hyperparameters: false
+        hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
+            depth: 10
+            learning_rate: 0.01
+            l2_leaf_reg: 3
+            random_strength: 1
+            bagging_temperature: 1
+    lightgbm:
+        n_folds: 3
+        use_custom_hyperparameters: false
+        hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
+            depth: 10
+            learning_rate: 0.01
+            l2_leaf_reg: 3
+            random_strength: 1
+            bagging_temperature: 1
+    xgboost:
+        n_folds: 3
+        use_custom_hyperparameters: false
+        hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
+            depth: 10
+            learning_rate: 0.01
+            l2_leaf_reg: 3
+            random_strength: 1
+            bagging_temperature: 1
+    random_forest:
+        n_folds: 3
+        use_custom_hyperparameters: false
+        hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
+            depth: 10
+            learning_rate: 0.01
+            l2_leaf_reg: 3
+            random_strength: 1
