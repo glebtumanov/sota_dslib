@@ -196,6 +196,9 @@ prev_days_decision_max
 prev_days_decision_mean
 prev_cnt_payment_mean
 prev_cnt_payment_sum
+prev_days_decision_diff_mean
+prev_days_decision_diff_max
+prev_days_decision_diff_min
 prev_name_contract_type_cash loans_mean
 prev_name_contract_type_consumer loans_mean
 prev_name_contract_type_revolving loans_mean

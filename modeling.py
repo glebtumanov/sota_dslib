@@ -5,13 +5,6 @@ import numpy as np
 import joblib
 from sklearn.model_selection import train_test_split
 
-from models.catboost_model import CatBoostModel
-from models.lightgbm_model import LightGBMModel
-from models.xgboost_model import XGBoostModel
-from models.random_forest_model import RandomForestModel
-from models.lightautoml_model import LightAutoMLModel
-from model_utils import recall_at_k
-
 class SOTAModels:
     def __init__(self, config_path):
         # Загружаем конфиг
@@ -22,7 +15,7 @@ class SOTAModels:
         common_config = self.config.get('common', {})
         self.task = common_config.get('task', 'binary')
         self.main_metric = common_config.get('main_metric', 'roc_auc')
-        self.metrics = common_config.get('metrics', [])
+        self.metrics_list = common_config.get('metrics', [])
         self.model_dir = common_config.get('model_dir', './models')
         self.skip_cols = common_config.get('skip_cols', [])
         self.selected_models = common_config.get('selected_models', ['catboost'])
@@ -126,7 +119,7 @@ class SOTAModels:
 
         # Инициализация контейнеров для хранения результатов
         self.trained_models = {}
-        self.metrics = {}
+        self.metrics_results = {}
 
     def _sampling(self):
         """
@@ -191,7 +184,9 @@ class SOTAModels:
             )
 
             # Затем разделяем оставшуюся часть на train и valid со стратификацией
-            valid_stratify = train_valid_df[self.target_col] if self.stratified_split and self.task in ['binary', 'multi'] else None
+            valid_stratify = (train_valid_df[self.target_col]
+                              if self.stratified_split and self.task in ['binary', 'multi']
+                              else None)
             self.train_df, self.valid_df = train_test_split(
                 train_valid_df,
                 test_size=self.validation_rate / (1 - self.test_rate),  # Корректируем долю
@@ -199,39 +194,46 @@ class SOTAModels:
                 stratify=valid_stratify  # Используем стратификацию для train_valid_df
             )
 
-    def _train_model(self):
+    def _train_model(self, model_type):
         """Обучает модель используя интерфейс BaseModel"""
         # Определение параметра калибровки
         calibrate = self.calibration_type if (self.use_calibration and self.task == 'binary') else None
 
         # Получаем количество фолдов для текущей модели
-        n_folds = self.model_n_folds.get(self.model_type, self.n_folds)
+        n_folds = self.model_n_folds.get(model_type, self.n_folds)
 
         # Формируем общий словарь аргументов для всех моделей
         model_args = {
             'task': self.task,
-            'hp': self.hp.get(self.model_type, None),
-            'metrics': self.metrics,
+            'hp': self.hp.get(model_type, None),
+            'metrics': self.metrics_list,
             'calibrate': calibrate,
             'n_folds': n_folds,
             'main_metric': self.main_metric,
             'verbose': self.verbose
         }
 
-        # Словарь соответствия типов моделей их классам
-        model_classes = {
-            'catboost': CatBoostModel,
-            'lightgbm': LightGBMModel,
-            'xgboost': XGBoostModel,
-            'random_forest': RandomForestModel,
-            'lightautoml': LightAutoMLModel
-        }
+        # Динамическая загрузка модулей моделей по мере необходимости
+        if model_type == 'catboost':
+            from models.catboost_model import CatBoostModel
+            model_class = CatBoostModel
+        elif model_type == 'lightgbm':
+            from models.lightgbm_model import LightGBMModel
+            model_class = LightGBMModel
+        elif model_type == 'xgboost':
+            from models.xgboost_model import XGBoostModel
+            model_class = XGBoostModel
+        elif model_type == 'random_forest':
+            from models.random_forest_model import RandomForestModel
+            model_class = RandomForestModel
+        elif model_type == 'lightautoml':
+            from models.lightautoml_model import LightAutoMLModel
+            model_class = LightAutoMLModel
+        else:
+            raise ValueError(f"Неизвестный тип модели: {model_type}")
 
         # Создаем экземпляр модели
-        if self.model_type not in model_classes:
-            raise ValueError(f"Неизвестный тип модели: {self.model_type}")
-
-        self.model = model_classes[self.model_type](**model_args)
+        self.model = model_class(**model_args)
 
         # Обучение модели через интерфейс BaseModel
         self.model.train(
@@ -257,10 +259,9 @@ class SOTAModels:
         # Обучение всех выбранных моделей
         for model_type in self.selected_models:
             print(f"Обучение модели: {model_type}")
-            self.model_type = model_type
 
             # Обучение модели
-            model = self._train_model()
+            model = self._train_model(model_type)
 
             # Сохранение модели в словаре
             self.trained_models[model_type] = model
@@ -268,16 +269,16 @@ class SOTAModels:
             # Вычисление метрик на тестовых данных через интерфейс модели
             metrics_result = model.evaluate(self.valid_df[self.selected_features], self.valid_df[self.target_col])
 
-            self.metrics[model_type] = metrics_result
+            self.metrics_results[model_type] = metrics_result
 
-            print(f"Результаты модели {model_type}: {self.metrics[model_type]}")
+            # print(f"Результаты модели {model_type}: {self.metrics_results[model_type]}")
 
         # Вывод лучшей модели по основной метрике
-        best_model = max(self.metrics, key=lambda m: self.metrics[m].get(self.main_metric, 0))
+        best_model = max(self.metrics_results, key=lambda m: self.metrics_results[m].get(self.main_metric, 0))
         print(f"Лучшая модель по метрике {self.main_metric}: {best_model}")
-        print(f"Значение метрики: {self.metrics[best_model].get(self.main_metric, 0)}")
+        print(f"Значение метрики: {self.metrics_results[best_model].get(self.main_metric, 0)}")
 
-        return self.trained_models, self.metrics
+        return self.trained_models, self.metrics_results
 
 
 if __name__ == '__main__':

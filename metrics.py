@@ -2,104 +2,6 @@ import numpy as np
 import yaml
 from typing import List, Dict, Any, Optional, Union, Callable, Set, Tuple
 from sklearn.metrics import *
-"""
-Доступные метрики для различных типов задач:
-
-Бинарная классификация (BINARY_METRICS):
-- accuracy: точность классификации
-  Параметры: нет
-  Значение: доля правильных предсказаний (TP + TN) / (TP + TN + FP + FN)
-  Источник: sklearn.metrics.accuracy_score
-
-- f1: F1-score
-  Параметры:
-    - average: str, default='binary' ('binary', 'micro', 'macro', 'weighted')
-    - pos_label: int, default=1
-    - sample_weight: array-like, default=None
-  Значение: гармоническое среднее precision и recall
-  Источник: sklearn.metrics.f1_score
-
-- precision: точность
-  Параметры:
-    - average: str, default='binary'
-    - pos_label: int, default=1
-    - sample_weight: array-like, default=None
-  Значение: TP / (TP + FP)
-  Источник: sklearn.metrics.precision_score
-
-- recall: полнота
-  Параметры:
-    - average: str, default='binary'
-    - pos_label: int, default=1
-    - sample_weight: array-like, default=None
-  Значение: TP / (TP + FN)
-  Источник: sklearn.metrics.recall_score
-
-- roc_auc: площадь под ROC-кривой
-  Параметры:
-    - average: str, default='macro'
-    - sample_weight: array-like, default=None
-    - max_fpr: float, default=None
-  Значение: площадь под кривой ROC (0-1)
-  Источник: sklearn.metrics.roc_auc_score
-
-- precision@k: точность на k лучших предсказаниях
-  Параметры:
-    - k: float, default=0.1 (доля от общего количества)
-  Значение: точность на top-k предсказаниях
-  Источник: собственная реализация
-
-- recall@k: полнота на k лучших предсказаниях
-  Параметры:
-    - k: float, default=0.1 (доля от общего количества)
-  Значение: полнота на top-k предсказаниях
-  Источник: собственная реализация
-
-- ap: средняя точность (average precision)
-  Параметры:
-    - average: str, default='binary' ('binary', 'micro', 'macro', 'weighted')
-    - pos_label: int, default=1
-    - sample_weight: array-like, default=None
-  Значение: средняя точность по всем порогам
-  Источник: sklearn.metrics.average_precision_score
-
-Многоклассовая классификация (MULTI_METRICS):
-[Аналогичные метрики как в бинарной классификации, но с поддержкой multi-class]
-
-Регрессия (REGRESSION_METRICS):
-- mse: среднеквадратичная ошибка
-  Параметры:
-    - sample_weight: array-like, default=None
-  Значение: среднее квадратов ошибок
-  Источник: sklearn.metrics.mean_squared_error
-
-- rmse: корень из среднеквадратичной ошибки
-  Параметры:
-    - sample_weight: array-like, default=None
-  Значение: корень из MSE
-  Источник: собственная реализация на основе MSE
-
-- mae: средняя абсолютная ошибка
-  Параметры:
-    - sample_weight: array-like, default=None
-  Значение: среднее абсолютных ошибок
-  Источник: sklearn.metrics.mean_absolute_error
-
-- r2: коэффициент детерминации
-  Параметры:
-    - sample_weight: array-like, default=None
-    - multioutput: str, default='uniform_average'
-  Значение: доля объясненной дисперсии (0-1)
-  Источник: sklearn.metrics.r2_score
-
-Примеры использования в конфиге:
-metrics:
-  - "f1;average=binary"
-  - "precision@k;k=0.01"
-  - "ap;average=micro"
-  - "r2;multioutput=uniform_average"
-  - "f1;average=weighted;sample_weight=balanced"
-"""
 
 # Определяем доступные метрики для каждого типа задачи
 BINARY_METRICS: Set[str] = {
@@ -171,6 +73,8 @@ class Metrics:
         self.name = name
         self.params = params
 
+    # Всегда предполагаем что в calculate приходят y_pred сырые значения,
+    # то есть вероятности классов или регрессионные значения или распределение вероятностей по классам
     def calculate(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
         """
         Расчёт значения метрики.

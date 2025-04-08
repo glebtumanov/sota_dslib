@@ -112,47 +112,15 @@ class BaseModel:
         Returns:
             Dict[str, float]: Словарь с метриками
         """
+        # Получаем предсказания модели
+        y_pred = self.predict(X)
+
+        metrics_list = self.get_metrics()
         metrics_dict = {}
 
-        # Получаем предсказания модели
-        if self.task == 'binary':
-            y_pred_proba = self.predict(X)
-            threshold = 0.5
-            y_pred = (y_pred_proba >= threshold).astype(int)
-
-            # Получаем метрики
-            metrics_list = self.get_metrics()
-
-            for metric in metrics_list:
-                value = metric.calculate(y, y_pred_proba)
-                metrics_dict[metric.name] = value
-                if self.verbose:
-                    print(f"  {metric.name}: {value:.4f}")
-
-        elif self.task == 'multi':
-            y_pred_proba = self.predict(X)
-            y_pred = np.argmax(y_pred_proba, axis=1)
-
-            # Получаем метрики
-            metrics_list = self.get_metrics()
-
-            for metric in metrics_list:
-                value = metric.calculate(y, y_pred_proba)
-                metrics_dict[metric.name] = value
-                if self.verbose:
-                    print(f"  {metric.name}: {value:.4f}")
-
-        else:  # regression
-            y_pred = self.predict(X)
-
-            # Получаем метрики
-            metrics_list = self.get_metrics()
-
-            for metric in metrics_list:
-                value = metric.calculate(y, y_pred)
-                metrics_dict[metric.name] = value
-                if self.verbose:
-                    print(f"  {metric.name}: {value:.4f}")
+        for metric in metrics_list:
+            value = metric.calculate(y, y_pred)
+            metrics_dict[metric.name] = value
 
         return metrics_dict
 
@@ -230,15 +198,17 @@ class BaseModel:
                 X_fold_val = train[features].iloc[val_idx]
                 y_fold_val = train[target].iloc[val_idx]
 
-                if self.verbose:
-                    print(f"Обучение на фолде {fold_idx + 1}/{self.n_folds} ({self.task})")
-
                 # Обучаем модель на фолде через реализацию дочернего класса
                 model = self._train_fold_binary(
                     X_fold_train, y_fold_train, X_fold_val, y_fold_val,
                     params, cat_features, fold_idx
                 )
                 self.models.append(model)
+
+                if self.verbose:
+                    print(f"Обучение на фолде {fold_idx + 1}/{self.n_folds} ({self.task})")
+                    metrics_dict = self.evaluate(X_fold_val, y_fold_val)
+                    print(f"Fold {fold_idx}: {self.main_metric}: {metrics_dict[self.main_metric]:.4f}")
         else:
             # Обучение без кросс-валидации
             model = self._train_fold_binary(
@@ -246,6 +216,11 @@ class BaseModel:
                 params, cat_features
             )
             self.models.append(model)
+
+        if self.verbose:
+            metrics_dict = self.evaluate(test[features], test[target])
+            for metric_name, metric_value in metrics_dict.items():
+                print(f"   {metric_name}: {metric_value:.4f}")
 
         # Применяем калибровку, если она включена
         if self.calibrate and self.task == 'binary':
@@ -396,6 +371,7 @@ class BaseModel:
         if self.calibrate not in ['betacal', 'isotonic']:
             return
 
+        print("Calibrating ...", end=" ")
         # Получаем усредненные некалиброванные вероятности
         # Используем реализацию от конкретного типа модели
         proba_sum = np.zeros(len(X))
@@ -410,5 +386,6 @@ class BaseModel:
         else:  # isotonic
             from sklearn.isotonic import IsotonicRegression
             self.calibration_model = IsotonicRegression(out_of_bounds='clip')
+        print("done")
 
         self.calibration_model.fit(proba.reshape(-1, 1), y)
