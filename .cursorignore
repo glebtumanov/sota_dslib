@@ -1,0 +1,7 @@
+LICENSE
+README.md
+.git/
+.gitignore
+*.csv
+*.zip
+*.parquet

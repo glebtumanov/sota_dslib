@@ -1,0 +1,5 @@
+Ссылка на скачивание датасета: https://www.kaggle.com/competitions/home-credit-default-risk/data
+Train shape: (307511, 461), Test shape: (48744, 460)
+Total features: 459, Categorical features: 16
+Target column: 'target'
+Auxiliary columns: 'sk_id_curr' (ID column)
