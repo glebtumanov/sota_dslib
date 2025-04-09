@@ -12,6 +12,8 @@ common:
     model_dir: "/home/gleb/models" # пути сохранения обученных моделей
     skip_cols: []
     selected_models:
+        - xgboost
+        - lightgbm
         - catboost
 
 split_data:
@@ -21,7 +23,7 @@ split_data:
     stratified_split: true # стратифицированное разбиение
 
 sampling: # начальное сэмплирование данных
-    use_sampling: false   # Если поставить false, то сэмплирование делать не будем
+    use_sampling: true   # Если поставить false, то сэмплирование делать не будем
     train_sample_size: 100000 # размер тренировочной выборки
     validation_sample_size: 100000 # размер валидационной выборки
     sample_seed: 42 # seed для сэмплирования

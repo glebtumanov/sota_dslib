@@ -71,6 +71,8 @@ def main():
         print("Преобразование имен колонок к нижнему регистру...")
         df.columns = [col.lower() for col in df.columns]
 
+        df['cover_type'] = df['cover_type'] - 1
+
         # Создание директории назначения, если она не существует
         os.makedirs(DST_DIR, exist_ok=True)
 

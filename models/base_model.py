@@ -59,18 +59,18 @@ class BaseModel:
                 kf = StratifiedKFold(n_splits=self.n_folds, random_state=42, shuffle=True)
                 split_indices = kf.split(train[features], train[target])
 
-            for fold_idx, (train_idx, val_idx) in enumerate(split_indices):
+            for fold_idx, (train_idx, test_idx) in enumerate(split_indices):
                 X_fold_train = train[features].iloc[train_idx]
                 y_fold_train = train[target].iloc[train_idx]
-                X_fold_val = train[features].iloc[val_idx]
-                y_fold_val = train[target].iloc[val_idx]
+                X_fold_test = train[features].iloc[test_idx]
+                y_fold_test = train[target].iloc[test_idx]
 
-                model = train_method(X_fold_train, y_fold_train, X_fold_val, y_fold_val,
-                                     params, cat_features, fold_idx)
+                model = train_method(X_fold_train, y_fold_train, X_fold_test, y_fold_test,
+                                     params, cat_features)
                 self.models.append(model)
 
                 if self.verbose:
-                    metrics_dict = self.evaluate(X_fold_val, y_fold_val)
+                    metrics_dict = self.evaluate(X_fold_test, y_fold_test)
                     print(f"Fold {fold_idx+1}: {self.main_metric}: {metrics_dict[self.main_metric]:.4f}")
         else:
             model = train_method(train[features], train[target], test[features], test[target],
@@ -193,13 +193,13 @@ class BaseModel:
         return metrics
 
     # Методы, которые должны быть реализованы в дочерних классах
-    def _train_fold_binary(self, X_train, y_train, X_val, y_val, params, cat_features, fold_idx=None):
+    def _train_fold_binary(self, X_train, y_train, X_test, y_test, params, cat_features):
         raise NotImplementedError("Метод _train_fold_binary должен быть реализован в дочернем классе")
 
-    def _train_fold_multi(self, X_train, y_train, X_val, y_val, params, cat_features, fold_idx=None):
+    def _train_fold_multi(self, X_train, y_train, X_test, y_test, params, cat_features):
         raise NotImplementedError("Метод _train_fold_multi должен быть реализован в дочернем классе")
 
-    def _train_fold_regression(self, X_train, y_train, X_val, y_val, params, cat_features, fold_idx=None):
+    def _train_fold_regression(self, X_train, y_train, X_test, y_test, params, cat_features):
         raise NotImplementedError("Метод _train_fold_regression должен быть реализован в дочернем классе")
 
     def _predict_fold_binary(self, model, X):

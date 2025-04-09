@@ -1,11 +1,11 @@
 common:
-    task: "multi" # binary, multi, regression
+    task: "regression" # binary, multi, regression
     metrics:
-        - "accuracy"
-        - "f1;average=weighted"
-        - "ap;average=macro" # average_precision_score
-        - "ap;average=weighted" # average_precision_score
-    main_metric: "accuracy"
+        - "mae"
+        - "rmse"
+        - "r2"
+        - "mape"
+    main_metric: "mae"
     model_dir: "/home/gleb/models" # пути сохранения обученных моделей
     skip_cols: []
     selected_models:
@@ -19,7 +19,7 @@ split_data:
     stratified_split: true # стратифицированное разбиение
 
 sampling: # начальное сэмплирование данных
-    use_sampling: true   # Если поставить false, то сэмплирование делать не будем
+    use_sampling: false   # Если поставить false, то сэмплирование делать не будем
     train_sample_size: 100000 # размер тренировочной выборки
     validation_sample_size: 100000 # размер валидационной выборки
     sample_seed: 42 # seed для сэмплирования
@@ -31,13 +31,13 @@ train:
     n_folds: 3 # количество фолдов для кросс-валидации
 
 columns:
-    all_features_file: "/www/dslib/spark_sota_modeling/dataset/forest-cover-type/features.txt"
-    category_features_file: "/www/dslib/spark_sota_modeling/dataset/forest-cover-type/categorical_features.txt"
-    target_col: "cover_type" # название целевой переменной
+    all_features_file: "/www/dslib/spark_sota_modeling/dataset/allstate-claims-severity/features.txt"
+    category_features_file: "/www/dslib/spark_sota_modeling/dataset/allstate-claims-severity/categorical_features.txt"
+    target_col: "loss" # название целевой переменной
     index_cols: [] # название колонки с id
 
 data_source: # данные уже предобработаны и не содержат пропусков, категориальные признаки закодированы в целые числа
-    train_path: "/www/dslib/spark_sota_modeling/dataset/forest-cover-type/train.parquet"
+    train_path: "/www/dslib/spark_sota_modeling/dataset/allstate-claims-severity/train.parquet"
     valid_path: null
 
 calibration:

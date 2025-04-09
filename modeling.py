@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import joblib
 from sklearn.model_selection import train_test_split
+from datetime import datetime
 
 class SOTAModels:
     def __init__(self, config_path):
@@ -252,6 +253,36 @@ class SOTAModels:
 
         return self.model
 
+    def _save_model(self, model_type, model, metric_value):
+        """
+        Сохраняет обученную модель и калибровочную модель (если есть) в директорию model_dir
+
+        Args:
+            model_type: Тип модели (например, 'catboost')
+            model: Экземпляр модели
+            metric_value: Значение основной метрики
+        """
+        # Создаем директорию, если не существует
+        os.makedirs(self.model_dir, exist_ok=True)
+
+        # Формируем название файла в формате ГГГГММДД_ЧЧММСС_МЕТРИКА_ТИП_МОДЕЛИ_ТИП_ЗАДАЧИ.pickle
+        current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_name = f"{current_time}_{metric_value:.4f}_{model_type}_{self.task}.pickle"
+        file_path = os.path.join(self.model_dir, file_name)
+
+        # Создаем список всех моделей для сохранения
+        models_to_save = model.models.copy()
+
+        # Добавляем калибровочную модель, если она есть
+        if model.calibration_model is not None:
+            models_to_save.append(model.calibration_model)
+
+        # Сохраняем модели с помощью joblib
+        joblib.dump(models_to_save, file_path)
+
+        if self.verbose:
+            print(f"Модель {model_type} сохранена в {file_path}")
+
     def train_models(self):
         """
         Последовательно обучает все модели из списка selected_models
@@ -277,6 +308,10 @@ class SOTAModels:
             metrics_result = model.evaluate(self.valid_df[self.selected_features], self.valid_df[self.target_col])
 
             self.metrics_results[model_type] = metrics_result
+
+            # Сохраняем модель вместе с калибровкой (если есть)
+            metric_value = metrics_result.get(self.main_metric, 0)
+            self._save_model(model_type, model, metric_value)
 
             # print(f"Результаты модели {model_type}: {self.metrics_results[model_type]}")
             print()

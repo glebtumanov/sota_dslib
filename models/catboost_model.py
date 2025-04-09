@@ -8,34 +8,34 @@ class CatBoostModel(BaseModel):
         # Вызываем инициализатор базового класса
         super().__init__(task, hp, metrics, calibrate, n_folds, main_metric, verbose)
 
-    def _train_fold_binary(self, X_train, y_train, X_val, y_val, params, cat_features, fold_idx=None):
+    def _train_fold_binary(self, X_train, y_train, X_test, y_test, params, cat_features):
         model = CatBoostClassifier(**params)
         model.fit(
             X_train,
             y_train,
-            eval_set=[(X_val, y_val)],
+            eval_set=[(X_test, y_test)],
             cat_features=cat_features,
             verbose=params.get('verbose', False)
         )
         return model
 
-    def _train_fold_multi(self, X_train, y_train, X_val, y_val, params, cat_features, fold_idx=None):
+    def _train_fold_multi(self, X_train, y_train, X_test, y_test, params, cat_features):
         model = CatBoostClassifier(**params)
         model.fit(
             X_train,
             y_train,
-            eval_set=[(X_val, y_val)],
+            eval_set=[(X_test, y_test)],
             cat_features=cat_features,
             verbose=params.get('verbose', False)
         )
         return model
 
-    def _train_fold_regression(self, X_train, y_train, X_val, y_val, params, cat_features, fold_idx=None):
+    def _train_fold_regression(self, X_train, y_train, X_test, y_test, params, cat_features):
         model = CatBoostRegressor(**params)
         model.fit(
             X_train,
             y_train,
-            eval_set=[(X_val, y_val)],
+            eval_set=[(X_test, y_test)],
             cat_features=cat_features,
             verbose=params.get('verbose', False)
         )

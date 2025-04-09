@@ -1,0 +1,4 @@
+Ссылка на скачивание датасета: https://www.kaggle.com/c/allstate-claims-severity/data
+Train shape: 188318, 132, Test shape: 125546, 131
+Total features: 130, Categorical features: 116
+Target column: loss, type: regression

@@ -8,6 +8,7 @@ import os
 import gc
 import warnings
 import time # Added for timing memory optimization
+import re
 warnings.filterwarnings('ignore')
 
 
@@ -15,11 +16,15 @@ warnings.filterwarnings('ignore')
 DATA_DIR = './home-credit-default-risk'
 DST_DIR = './home-credit-default-risk'
 
+def normalize_column_name(col_name):
+    """Normalize column name: lowercase and replace non-alphanumeric with underscores"""
+    return re.sub(r'[^a-z0-9]', '_', str(col_name).lower())
+
 def read_data(file_path):
     """Read a CSV file and display its shape"""
     df = pd.read_csv(file_path)
-    # Convert column names to lowercase
-    df.columns = [col.lower() for col in df.columns]
+    # Convert column names to lowercase and replace all non-alphanumeric characters with underscores
+    df.columns = [normalize_column_name(col) for col in df.columns]
     print(f"Read {os.path.basename(file_path)}, shape: {df.shape}")
     return df
 
@@ -45,7 +50,7 @@ def encode_categorical_features(train_df, test_df):
 
     for col in original_object_cols:
         if col in train_df.columns and col in test_df.columns: # Ensure column exists after merges
-            categorical_features.append(col)
+            categorical_features.append(normalize_column_name(col))
 
             # Fill missing values consistently
             train_df[col] = train_df[col].fillna('Unknown').astype(str)
@@ -70,7 +75,7 @@ def encode_categorical_features(train_df, test_df):
          print(f"Warning: Found unexpected object columns after merge/aggregation: {remaining_object_cols}. Attempting LabelEncoding.")
          for col in remaining_object_cols:
              if col in train_df.columns and col in test_df.columns:
-                 categorical_features.append(col)
+                 categorical_features.append(normalize_column_name(col))
                  train_df[col] = train_df[col].fillna('Unknown').astype(str)
                  test_df[col] = test_df[col].fillna('Unknown').astype(str)
                  le = LabelEncoder()
@@ -85,8 +90,8 @@ def encode_categorical_features(train_df, test_df):
 def one_hot_encode_categorical(df, column):
     """One-hot encode a categorical column and return aggregate functions for it"""
     dummies = pd.get_dummies(df[column], prefix=column, dummy_na=True)
-    # Convert column names to lowercase
-    dummies.columns = [col.lower() for col in dummies.columns]
+    # Normalize column names
+    dummies.columns = [normalize_column_name(col) for col in dummies.columns]
     df = pd.concat([df, dummies], axis=1)
 
     # Create aggregation dict for dummies
@@ -113,7 +118,8 @@ def aggregate_bureau_data(bureau, bureau_balance):
 
     # Aggregate bureau_balance
     bb_agg = bureau_balance.groupby('sk_id_bureau').agg({**bb_aggregations, 'status': status_to_numeric})
-    bb_agg.columns = pd.Index([f'bb_{e[0]}_{e[1].lower()}' if e[1] != '<lambda>' else f'bb_{e[0]}_mean'
+    # Normalize column names
+    bb_agg.columns = pd.Index([normalize_column_name(f'bb_{e[0]}_{e[1].lower()}' if e[1] != '<lambda>' else f'bb_{e[0]}_mean')
                               for e in bb_agg.columns.tolist()])
 
     # Merge with bureau data
@@ -153,16 +159,17 @@ def aggregate_bureau_data(bureau, bureau_balance):
     bureau_agg_df = bureau.groupby('sk_id_curr').agg({**num_aggregations, **categorical_aggs})
 
     # Rename columns
-    bureau_agg_df.columns = pd.Index([f'bureau_{e[0]}_{e[1].lower()}' for e in bureau_agg_df.columns.tolist()])
+    bureau_agg_df.columns = pd.Index([normalize_column_name(f'bureau_{e[0]}_{e[1].lower()}')
+                                    for e in bureau_agg_df.columns.tolist()])
 
     # Add counts
-    bureau_agg_df['bureau_count'] = bureau.groupby('sk_id_curr').size()
+    bureau_agg_df[normalize_column_name('bureau_count')] = bureau.groupby('sk_id_curr').size()
 
     # Calculate active loans ratio
     active_col = [col for col in bureau.columns if 'credit_active_active' in col.lower()]
     if active_col:
         active_bureau = bureau[active_col[0]].groupby(bureau['sk_id_curr']).sum()
-        bureau_agg_df['bureau_active_ratio'] = active_bureau / bureau_agg_df['bureau_count']
+        bureau_agg_df[normalize_column_name('bureau_active_ratio')] = active_bureau / bureau_agg_df[normalize_column_name('bureau_count')].replace(0, 1)
 
     print(f"Bureau data aggregated in {time.time() - start_time:.2f} seconds.")
     return bureau_agg_df.fillna(0)
@@ -180,7 +187,7 @@ def aggregate_prev_applications(prev):
     prev['days_termination'].replace(365243, np.nan, inplace=True)
 
     # Add new features based on days
-    prev['days_decision_diff'] = prev['days_decision'] - prev['days_first_due'] # Example
+    prev[normalize_column_name('days_decision_diff')] = prev['days_decision'] - prev['days_first_due'] # Example
     # Add more relevant features here based on domain knowledge or exploration
 
     # Numerical aggregations
@@ -193,7 +200,7 @@ def aggregate_prev_applications(prev):
         'hour_appr_process_start': ['min', 'max', 'mean'],
         'days_decision': ['min', 'max', 'mean'],
         'cnt_payment': ['mean', 'sum'],
-        'days_decision_diff': ['mean', 'max', 'min'] # Aggregate new features
+        normalize_column_name('days_decision_diff'): ['mean', 'max', 'min'] # Aggregate new features
         # Add more aggregations for new features
     }
 
@@ -209,16 +216,17 @@ def aggregate_prev_applications(prev):
     prev_agg_df = prev.groupby('sk_id_curr').agg({**num_aggregations, **categorical_aggs})
 
     # Rename columns
-    prev_agg_df.columns = pd.Index([f'prev_{e[0]}_{e[1].lower()}' for e in prev_agg_df.columns.tolist()])
+    prev_agg_df.columns = pd.Index([normalize_column_name(f'prev_{e[0]}_{e[1].lower()}')
+                                  for e in prev_agg_df.columns.tolist()])
 
     # Add counts
-    prev_agg_df['prev_count'] = prev.groupby('sk_id_curr').size()
+    prev_agg_df[normalize_column_name('prev_count')] = prev.groupby('sk_id_curr').size()
 
     # Calculate approval ratio using dummy variable
     approved_col = [col for col in prev.columns if 'name_contract_status_approved' in col.lower()]
     if approved_col:
         approved_count = prev.groupby('sk_id_curr')[approved_col[0]].sum()
-        prev_agg_df['prev_approved_ratio'] = approved_count / prev_agg_df['prev_count']
+        prev_agg_df[normalize_column_name('prev_approved_ratio')] = approved_count / prev_agg_df[normalize_column_name('prev_count')].replace(0, 1)
 
     print(f"Previous application data aggregated in {time.time() - start_time:.2f} seconds.")
     return prev_agg_df.fillna(0)
@@ -247,10 +255,11 @@ def aggregate_pos_cash(pos):
     pos_agg_df = pos.groupby('sk_id_curr').agg({**num_aggregations, **categorical_aggs})
 
     # Rename columns
-    pos_agg_df.columns = pd.Index([f'pos_{e[0]}_{e[1].lower()}' for e in pos_agg_df.columns.tolist()])
+    pos_agg_df.columns = pd.Index([normalize_column_name(f'pos_{e[0]}_{e[1].lower()}')
+                                 for e in pos_agg_df.columns.tolist()])
 
     # Add counts
-    pos_agg_df['pos_count'] = pos.groupby('sk_id_curr').size()
+    pos_agg_df[normalize_column_name('pos_count')] = pos.groupby('sk_id_curr').size()
 
     print(f"POS CASH balance data aggregated in {time.time() - start_time:.2f} seconds.")
     return pos_agg_df.fillna(0)
@@ -261,30 +270,31 @@ def aggregate_installments(ins):
     start_time = time.time()
 
     # Create additional features
-    ins['payment_perc'] = ins['amt_payment'] / ins['amt_instalment']
-    ins['payment_diff'] = ins['amt_instalment'] - ins['amt_payment']
-    ins['dpd'] = ins['days_entry_payment'] - ins['days_instalment']
-    ins['dbd'] = ins['days_instalment'] - ins['days_entry_payment']
-    ins['dpd'] = ins['dpd'].apply(lambda x: max(x, 0))
-    ins['dbd'] = ins['dbd'].apply(lambda x: max(x, 0))
+    ins[normalize_column_name('payment_perc')] = ins['amt_payment'] / ins['amt_instalment'].replace(0, 1)
+    ins[normalize_column_name('payment_diff')] = ins['amt_instalment'] - ins['amt_payment']
+    ins[normalize_column_name('dpd')] = ins['days_entry_payment'] - ins['days_instalment']
+    ins[normalize_column_name('dbd')] = ins['days_instalment'] - ins['days_entry_payment']
+    ins[normalize_column_name('dpd')] = ins[normalize_column_name('dpd')].apply(lambda x: max(x, 0))
+    ins[normalize_column_name('dbd')] = ins[normalize_column_name('dbd')].apply(lambda x: max(x, 0))
 
     # All columns in installments are numerical
     ins_agg = {
         'num_instalment_version': ['nunique'],
-        'dpd': ['max', 'mean', 'sum'],
-        'dbd': ['max', 'mean', 'sum'],
-        'payment_perc': ['max', 'mean', 'sum', 'var'],
-        'payment_diff': ['max', 'mean', 'sum', 'var'],
+        normalize_column_name('dpd'): ['max', 'mean', 'sum'],
+        normalize_column_name('dbd'): ['max', 'mean', 'sum'],
+        normalize_column_name('payment_perc'): ['max', 'mean', 'sum', 'var'],
+        normalize_column_name('payment_diff'): ['max', 'mean', 'sum', 'var'],
         'amt_instalment': ['max', 'mean', 'sum'],
         'amt_payment': ['min', 'max', 'mean', 'sum'],
         'days_entry_payment': ['max', 'mean', 'sum'],
     }
 
     ins_agg_df = ins.groupby('sk_id_curr').agg(ins_agg)
-    ins_agg_df.columns = pd.Index([f'ins_{e[0]}_{e[1].lower()}' for e in ins_agg_df.columns.tolist()])
+    ins_agg_df.columns = pd.Index([normalize_column_name(f'ins_{e[0]}_{e[1].lower()}')
+                                 for e in ins_agg_df.columns.tolist()])
 
     # Add counts
-    ins_agg_df['ins_count'] = ins.groupby('sk_id_curr').size()
+    ins_agg_df[normalize_column_name('ins_count')] = ins.groupby('sk_id_curr').size()
 
     print(f"Installments payments data aggregated in {time.time() - start_time:.2f} seconds.")
     return ins_agg_df.fillna(0)
@@ -325,15 +335,16 @@ def aggregate_credit_card(cc):
     cc_agg_df = cc.groupby('sk_id_curr').agg({**num_aggregations, **categorical_aggs})
 
     # Rename columns
-    cc_agg_df.columns = pd.Index([f'cc_{e[0]}_{e[1].lower()}' for e in cc_agg_df.columns.tolist()])
+    cc_agg_df.columns = pd.Index([normalize_column_name(f'cc_{e[0]}_{e[1].lower()}')
+                                for e in cc_agg_df.columns.tolist()])
 
     # Add counts
-    cc_agg_df['cc_count'] = cc.groupby('sk_id_curr').size()
+    cc_agg_df[normalize_column_name('cc_count')] = cc.groupby('sk_id_curr').size()
 
     # Calculate utilization
-    cc['utilization'] = cc['amt_balance'] / cc['amt_credit_limit_actual']
-    cc_agg_df['cc_utilization_mean'] = cc.groupby('sk_id_curr')['utilization'].mean()
-    cc_agg_df['cc_utilization_max'] = cc.groupby('sk_id_curr')['utilization'].max()
+    cc[normalize_column_name('utilization')] = cc['amt_balance'] / cc['amt_credit_limit_actual'].replace(0, 1)
+    cc_agg_df[normalize_column_name('cc_utilization_mean')] = cc.groupby('sk_id_curr')[normalize_column_name('utilization')].mean()
+    cc_agg_df[normalize_column_name('cc_utilization_max')] = cc.groupby('sk_id_curr')[normalize_column_name('utilization')].max()
 
     print(f"Credit card balance data aggregated in {time.time() - start_time:.2f} seconds.")
     return cc_agg_df.fillna(0)
@@ -437,6 +448,18 @@ def apply_types(df, type_map):
     print(f"Type application finished in {time.time() - start_time:.2f} seconds.")
     return df
 
+def handle_infinite_values(df, default_value=0):
+    """
+    Заменяет бесконечные значения (inf) на NaN, а затем на указанное значение по умолчанию.
+    """
+    # Заменяем положительную и отрицательную бесконечность на NaN
+    df = df.replace([np.inf, -np.inf], np.nan)
+
+    # Заполняем NaN значением по умолчанию
+    df = df.fillna(default_value)
+
+    return df
+
 def main():
     """Main function to process and prepare the dataset"""
     print("Starting Home Credit Default Risk dataset preparation...")
@@ -460,6 +483,13 @@ def main():
     pos_cash_agg = aggregate_pos_cash(pos_cash)
     installments_agg = aggregate_installments(installments)
     credit_card_agg = aggregate_credit_card(credit_card)
+
+    # Обработка бесконечных значений
+    bureau_agg = handle_infinite_values(bureau_agg)
+    prev_agg = handle_infinite_values(prev_agg)
+    pos_cash_agg = handle_infinite_values(pos_cash_agg)
+    installments_agg = handle_infinite_values(installments_agg)
+    credit_card_agg = handle_infinite_values(credit_card_agg)
 
     # Free up memory
     del bureau, bureau_balance, prev_app, pos_cash, installments, credit_card
@@ -515,12 +545,17 @@ def main():
     test_df = apply_types(test_df, optimal_types)
     gc.collect()
 
+    # Обработка бесконечных значений в итоговых датасетах
+    train_df = handle_infinite_values(train_df)
+    test_df = handle_infinite_values(test_df)
+
 
     # Get the list of features (excluding TARGET and ID)
-    # Ensure features list is derived from the final train_df columns
-    features = [col for col in train_df.columns if col not in ['target', 'sk_id_curr']]
+    # Ensure features list is derived from the final train_df columns and all names are normalized
+    features = [normalize_column_name(col) for col in train_df.columns if col not in ['target', 'sk_id_curr']]
+
     # Align columns: Ensure test_df has the same columns as train_df (except 'target') in the same order
-    test_features = [col for col in test_df.columns if col not in ['sk_id_curr']]
+    test_features = [normalize_column_name(col) for col in test_df.columns if col not in ['sk_id_curr']]
     missing_in_test = set(features) - set(test_features)
     missing_in_train = set(test_features) - set(features)
 
