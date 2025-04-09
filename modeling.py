@@ -128,6 +128,8 @@ class SOTAModels:
         if not self.use_sampling:
             return
 
+        print(f"Sampling data ...")
+
         # Сэмплирование обучающих данных
         if self.train_sample_size < len(self.train_df):
             if self.task == 'binary' and self.balanced_sampling:
@@ -159,8 +161,11 @@ class SOTAModels:
         if self.valid_df is not None and self.validation_sample_size < len(self.valid_df):
             self.valid_df = self.valid_df.sample(n=self.validation_sample_size, random_state=self.sample_seed)
 
+        print(f"Data sampled: train shape: {self.train_df.shape}, valid shape: {self.valid_df.shape}")
+
     def _split_data(self):
         # Стратификация применяется только при разбиении на train и другие наборы данных
+        print(f"Splitting data ...")
         stratify = None
         if self.stratified_split and self.task in ['binary', 'multi']:
             stratify = self.data[self.target_col]
@@ -193,6 +198,7 @@ class SOTAModels:
                 random_state=42,
                 stratify=valid_stratify  # Используем стратификацию для train_valid_df
             )
+        print(f"Data split done: train shape: {self.train_df.shape}, test shape: {self.test_df.shape}, valid shape: {self.valid_df.shape}")
 
     def _train_model(self, model_type):
         """Обучает модель используя интерфейс BaseModel"""
@@ -258,7 +264,8 @@ class SOTAModels:
 
         # Обучение всех выбранных моделей
         for model_type in self.selected_models:
-            print(f"Обучение модели: {model_type}")
+            print('-' * 10)
+            print(f"Обучение модели: {model_type} на {self.n_folds} фолдах, тип задачи: {self.task}")
 
             # Обучение модели
             model = self._train_model(model_type)
@@ -272,6 +279,7 @@ class SOTAModels:
             self.metrics_results[model_type] = metrics_result
 
             # print(f"Результаты модели {model_type}: {self.metrics_results[model_type]}")
+            print()
 
         # Вывод лучшей модели по основной метрике
         best_model = max(self.metrics_results, key=lambda m: self.metrics_results[m].get(self.main_metric, 0))

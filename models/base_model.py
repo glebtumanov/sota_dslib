@@ -30,27 +30,60 @@ class BaseModel:
 
     def train(self, train, test, target, features, cat_features=[]):
         """
-        Обучает модель на тренировочных данных и валидирует на тестовых
+        Общий метод обучения для всех типов задач (бинарная, мультиклассовая, регрессия)
+        Использует паттерн "Шаблонный метод" для выбора специфичной для типа задачи логики
 
         Args:
             train: DataFrame с тренировочными данными
-            test: DataFrame с тестовыми данными для ранней остановки
+            test: DataFrame с тестовыми данными
             target: имя целевой переменной
-            features: список признаков для обучения
+            features: список используемых признаков
             cat_features: список категориальных признаков
-
-        Returns:
-            Обученная модель
         """
-        if self.task == 'binary':
-            self._train_binary(train, test, target, features, cat_features)
-        elif self.task == 'multi':
-            self._train_multi(train, test, target, features, cat_features)
-        elif self.task == 'regression':
-            self._train_regression(train, test, target, features, cat_features)
+        params = self.get_hyperparameters()
+        self.models = []
+
+        train_methods = {
+            'binary': self._train_fold_binary,
+            'multi': self._train_fold_multi,
+            'regression': self._train_fold_regression
+        }
+
+        train_method = train_methods[self.task]
+
+        if self.n_folds > 1:
+            if self.task == 'regression':
+                kf = KFold(n_splits=self.n_folds, random_state=42, shuffle=True)
+                split_indices = kf.split(train[features])
+            else:
+                kf = StratifiedKFold(n_splits=self.n_folds, random_state=42, shuffle=True)
+                split_indices = kf.split(train[features], train[target])
+
+            for fold_idx, (train_idx, val_idx) in enumerate(split_indices):
+                X_fold_train = train[features].iloc[train_idx]
+                y_fold_train = train[target].iloc[train_idx]
+                X_fold_val = train[features].iloc[val_idx]
+                y_fold_val = train[target].iloc[val_idx]
+
+                model = train_method(X_fold_train, y_fold_train, X_fold_val, y_fold_val,
+                                     params, cat_features, fold_idx)
+                self.models.append(model)
+
+                if self.verbose:
+                    metrics_dict = self.evaluate(X_fold_val, y_fold_val)
+                    print(f"Fold {fold_idx+1}: {self.main_metric}: {metrics_dict[self.main_metric]:.4f}")
         else:
-            raise ValueError(f"Неизвестный тип задачи: {self.task}. Допустимые значения: 'binary', 'multi', 'regression'")
-        return self
+            model = train_method(train[features], train[target], test[features], test[target],
+                                 params, cat_features)
+            self.models.append(model)
+
+        if self.verbose:
+            metrics_dict = self.evaluate(test[features], test[target])
+            for metric_name, metric_value in metrics_dict.items():
+                print(f"   {metric_name}: {metric_value:.4f}")
+
+        if self.calibrate and self.task == 'binary':
+            self._calibrate(test[features], test[target])
 
     def predict(self, X, y=None):
         """
@@ -71,13 +104,13 @@ class BaseModel:
         for model in self.models:
             if self.task == 'binary':
                 # Вероятность положительного класса
-                fold_pred = self._predict_binary_fold(model, X)
+                fold_pred = self._predict_fold_binary(model, X)
             elif self.task == 'multi':
                 # Вероятности всех классов
-                fold_pred = self._predict_multi_fold(model, X)
+                fold_pred = self._predict_fold_multi(model, X)
             else:  # regression
                 # Предсказанное значение
-                fold_pred = self._predict_regression_fold(model, X)
+                fold_pred = self._predict_fold_regression(model, X)
 
             predictions.append(fold_pred)
 
@@ -120,7 +153,7 @@ class BaseModel:
 
         for metric in metrics_list:
             value = metric.calculate(y, y_pred)
-            metrics_dict[metric.name] = value
+            metrics_dict[metric.metric_name_with_params] = value
 
         return metrics_dict
 
@@ -152,173 +185,12 @@ class BaseModel:
 
         metrics = []
         for metric_item in self.metrics_list:
-            # Парсим строку метрики
-            if isinstance(metric_item, str):
-                name, params = parse_metric_string(metric_item)
-
-            # Проверяем, доступна ли метрика для данного типа задачи
-            if name not in available_metrics:
-                print(f"Warning: Metric '{name}' is not available for task type '{self.task}'")
-                continue
-
             try:
-                metrics.append(Metrics(name, **params))
+                metrics.append(Metrics(metric_item))
             except ValueError as e:
                 print(f"Warning: {e}")
 
         return metrics
-
-    def _train_binary(self, train, test, target, features, cat_features):
-        """
-        Обучает бинарную модель классификации с использованием кросс-валидации
-
-        Args:
-            train: DataFrame с тренировочными данными
-            test: DataFrame с тестовыми данными
-            target: имя целевой переменной
-            features: список используемых признаков
-            cat_features: список категориальных признаков
-        """
-        # Получаем параметры модели
-        params = self.get_hyperparameters()
-
-        # Очищаем предыдущие модели, если они были
-        self.models = []
-
-        # Обучение с кросс-валидацией
-        if self.n_folds > 1:
-            # Создаем генератор фолдов
-            skf = StratifiedKFold(n_splits=self.n_folds, random_state=42, shuffle=True)
-
-            # Обучаем модель на каждом фолде
-            for fold_idx, (train_idx, val_idx) in enumerate(skf.split(train[features], train[target])):
-                # Выделяем данные для текущего фолда
-                X_fold_train = train[features].iloc[train_idx]
-                y_fold_train = train[target].iloc[train_idx]
-                X_fold_val = train[features].iloc[val_idx]
-                y_fold_val = train[target].iloc[val_idx]
-
-                # Обучаем модель на фолде через реализацию дочернего класса
-                model = self._train_fold_binary(
-                    X_fold_train, y_fold_train, X_fold_val, y_fold_val,
-                    params, cat_features, fold_idx
-                )
-                self.models.append(model)
-
-                if self.verbose:
-                    print(f"Обучение на фолде {fold_idx + 1}/{self.n_folds} ({self.task})")
-                    metrics_dict = self.evaluate(X_fold_val, y_fold_val)
-                    print(f"Fold {fold_idx}: {self.main_metric}: {metrics_dict[self.main_metric]:.4f}")
-        else:
-            # Обучение без кросс-валидации
-            model = self._train_fold_binary(
-                train[features], train[target], test[features], test[target],
-                params, cat_features
-            )
-            self.models.append(model)
-
-        if self.verbose:
-            metrics_dict = self.evaluate(test[features], test[target])
-            for metric_name, metric_value in metrics_dict.items():
-                print(f"   {metric_name}: {metric_value:.4f}")
-
-        # Применяем калибровку, если она включена
-        if self.calibrate and self.task == 'binary':
-            self._calibrate(test[features], test[target])
-
-    def _train_multi(self, train, test, target, features, cat_features):
-        """
-        Обучает мультиклассовую модель с использованием кросс-валидации
-
-        Args:
-            train: DataFrame с тренировочными данными
-            test: DataFrame с тестовыми данными
-            target: имя целевой переменной
-            features: список используемых признаков
-            cat_features: список категориальных признаков
-        """
-        # Получаем параметры модели
-        params = self.get_hyperparameters()
-
-        # Очищаем предыдущие модели, если они были
-        self.models = []
-
-        # Обучение с кросс-валидацией
-        if self.n_folds > 1:
-            # Создаем генератор фолдов
-            skf = StratifiedKFold(n_splits=self.n_folds, random_state=42, shuffle=True)
-
-            # Обучаем модель на каждом фолде
-            for fold_idx, (train_idx, val_idx) in enumerate(skf.split(train[features], train[target])):
-                # Выделяем данные для текущего фолда
-                X_fold_train = train[features].iloc[train_idx]
-                y_fold_train = train[target].iloc[train_idx]
-                X_fold_val = train[features].iloc[val_idx]
-                y_fold_val = train[target].iloc[val_idx]
-
-                if self.verbose:
-                    print(f"Обучение на фолде {fold_idx + 1}/{self.n_folds} ({self.task})")
-
-                # Обучаем модель на фолде через реализацию дочернего класса
-                model = self._train_fold_multi(
-                    X_fold_train, y_fold_train, X_fold_val, y_fold_val,
-                    params, cat_features, fold_idx
-                )
-                self.models.append(model)
-        else:
-            # Обучение без кросс-валидации
-            model = self._train_fold_multi(
-                train[features], train[target], test[features], test[target],
-                params, cat_features
-            )
-            self.models.append(model)
-
-    def _train_regression(self, train, test, target, features, cat_features):
-        """
-        Обучает регрессионную модель с использованием кросс-валидации
-
-        Args:
-            train: DataFrame с тренировочными данными
-            test: DataFrame с тестовыми данными
-            target: имя целевой переменной
-            features: список используемых признаков
-            cat_features: список категориальных признаков
-        """
-        # Получаем параметры модели
-        params = self.get_hyperparameters()
-
-        # Очищаем предыдущие модели, если они были
-        self.models = []
-
-        # Обучение с кросс-валидацией
-        if self.n_folds > 1:
-            # Создаем генератор фолдов (для регрессии используем обычный KFold)
-            kf = KFold(n_splits=self.n_folds, random_state=42, shuffle=True)
-
-            # Обучаем модель на каждом фолде
-            for fold_idx, (train_idx, val_idx) in enumerate(kf.split(train[features])):
-                # Выделяем данные для текущего фолда
-                X_fold_train = train[features].iloc[train_idx]
-                y_fold_train = train[target].iloc[train_idx]
-                X_fold_val = train[features].iloc[val_idx]
-                y_fold_val = train[target].iloc[val_idx]
-
-                if self.verbose:
-                    print(f"Обучение на фолде {fold_idx + 1}/{self.n_folds} ({self.task})")
-
-                # Обучаем модель на фолде через реализацию дочернего класса
-                model = self._train_fold_regression(
-                    X_fold_train, y_fold_train, X_fold_val, y_fold_val,
-                    params, cat_features, fold_idx
-                )
-                self.models.append(model)
-        else:
-            # Обучение без кросс-валидации
-            model = self._train_fold_regression(
-                train[features], train[target], test[features], test[target],
-                params, cat_features
-            )
-            self.models.append(model)
 
     # Методы, которые должны быть реализованы в дочерних классах
     def _train_fold_binary(self, X_train, y_train, X_val, y_val, params, cat_features, fold_idx=None):
@@ -330,13 +202,13 @@ class BaseModel:
     def _train_fold_regression(self, X_train, y_train, X_val, y_val, params, cat_features, fold_idx=None):
         raise NotImplementedError("Метод _train_fold_regression должен быть реализован в дочернем классе")
 
-    def _predict_binary_fold(self, model, X):
+    def _predict_fold_binary(self, model, X):
         raise NotImplementedError("Метод _predict_binary_fold должен быть реализован в дочернем классе")
 
-    def _predict_multi_fold(self, model, X):
+    def _predict_fold_multi(self, model, X):
         raise NotImplementedError("Метод _predict_multi_fold должен быть реализован в дочернем классе")
 
-    def _predict_regression_fold(self, model, X):
+    def _predict_fold_regression(self, model, X):
         raise NotImplementedError("Метод _predict_regression_fold должен быть реализован в дочернем классе")
 
     def _get_default_hp_binary(self):
@@ -376,7 +248,7 @@ class BaseModel:
         # Используем реализацию от конкретного типа модели
         proba_sum = np.zeros(len(X))
         for model in self.models:
-            proba_sum += self._predict_binary_fold(model, X)
+            proba_sum += self._predict_fold_binary(model, X)
         proba = proba_sum / len(self.models)
 
         # Выбираем и обучаем модель калибровки

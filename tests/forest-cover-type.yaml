@@ -1,0 +1,81 @@
+common:
+    task: "multi" # binary, multi, regression
+    metrics:
+        - "accuracy"
+        - "f1;average=weighted"
+        - "ap;average=macro" # average_precision_score
+        - "ap;average=weighted" # average_precision_score
+    main_metric: "accuracy"
+    model_dir: "/home/gleb/models" # пути сохранения обученных моделей
+    skip_cols: []
+    selected_models:
+        - catboost
+
+split_data:
+    test_rate: 0.2
+    validation_rate: 0.2 # если не казан valid_path
+    stratified_split: true # стратифицированное разбиение
+
+sampling: # начальное сэмплирование данных
+    use_sampling: true   # Если поставить false, то сэмплирование делать не будем
+    train_sample_size: 100000 # размер тренировочной выборки
+    validation_sample_size: 100000 # размер валидационной выборки
+    sample_seed: 42 # seed для сэмплирования
+    balanced_sampling: false # только для классификации
+    positive_rate: 0.5 # только для бинарной классификации
+
+train:
+    verbose: true
+    n_folds: 3 # количество фолдов для кросс-валидации
+
+columns:
+    all_features_file: "/www/dslib/spark_sota_modeling/dataset/forest-cover-type/features.txt"
+    category_features_file: "/www/dslib/spark_sota_modeling/dataset/forest-cover-type/categorical_features.txt"
+    target_col: "cover_type" # название целевой переменной
+    index_cols: [] # название колонки с id
+
+data_source: # данные уже предобработаны и не содержат пропусков, категориальные признаки закодированы в целые числа
+    train_path: "/www/dslib/spark_sota_modeling/dataset/forest-cover-type/train.parquet"
+    valid_path: null
+
+calibration:
+    use_calibration: false # калибровка модели (только для бинарной классификации)
+    calibration_type: "betacal" # betacal, isotonic
+
+# Настройки специфичные для каждой модели
+models:
+    catboost:
+        n_folds: 3
+        use_custom_hyperparameters: false
+        hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
+            depth: 10
+            learning_rate: 0.01
+            l2_leaf_reg: 3
+            random_strength: 1
+            bagging_temperature: 1
+    lightgbm:
+        n_folds: 3
+        use_custom_hyperparameters: false
+        hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
+            depth: 10
+            learning_rate: 0.01
+            l2_leaf_reg: 3
+            random_strength: 1
+            bagging_temperature: 1
+    xgboost:
+        n_folds: 3
+        use_custom_hyperparameters: false
+        hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
+            depth: 10
+            learning_rate: 0.01
+            l2_leaf_reg: 3
+            random_strength: 1
+            bagging_temperature: 1
+    random_forest:
+        n_folds: 3
+        use_custom_hyperparameters: false
+        hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
+            depth: 10
+            learning_rate: 0.01
+            l2_leaf_reg: 3
+            random_strength: 1

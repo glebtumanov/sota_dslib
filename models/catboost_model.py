@@ -41,13 +41,13 @@ class CatBoostModel(BaseModel):
         )
         return model
 
-    def _predict_binary_fold(self, model, X):
+    def _predict_fold_binary(self, model, X):
         return model.predict_proba(X)[:, 1]
 
-    def _predict_multi_fold(self, model, X):
+    def _predict_fold_multi(self, model, X):
         return model.predict_proba(X)
 
-    def _predict_regression_fold(self, model, X):
+    def _predict_fold_regression(self, model, X):
         return model.predict(X)
 
     def _get_default_hp_binary(self):
