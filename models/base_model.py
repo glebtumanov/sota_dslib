@@ -29,17 +29,6 @@ class BaseModel:
         self.verbose = verbose
 
     def train(self, train, test, target, features, cat_features=[]):
-        """
-        Общий метод обучения для всех типов задач (бинарная, мультиклассовая, регрессия)
-        Использует паттерн "Шаблонный метод" для выбора специфичной для типа задачи логики
-
-        Args:
-            train: DataFrame с тренировочными данными
-            test: DataFrame с тестовыми данными
-            target: имя целевой переменной
-            features: список используемых признаков
-            cat_features: список категориальных признаков
-        """
         params = self.get_hyperparameters()
         self.models = []
 
@@ -67,52 +56,40 @@ class BaseModel:
 
                 model = train_method(X_fold_train, y_fold_train, X_fold_test, y_fold_test,
                                      params, cat_features)
+                self.evaluate(X_fold_test, y_fold_test, model, fold_idx=fold_idx)
                 self.models.append(model)
 
-                if self.verbose:
-                    metrics_dict = self.evaluate(X_fold_test, y_fold_test)
-                    print(f"Fold {fold_idx+1}: {self.main_metric}: {metrics_dict[self.main_metric]:.4f}")
         else:
             model = train_method(train[features], train[target], test[features], test[target],
                                  params, cat_features)
             self.models.append(model)
 
-        if self.verbose:
-            metrics_dict = self.evaluate(test[features], test[target])
-            for metric_name, metric_value in metrics_dict.items():
-                print(f"   {metric_name}: {metric_value:.4f}")
+        print("Метрики на тестовых данных (holdout):")
+        self.evaluate(test[features], test[target])
 
         if self.calibrate and self.task == 'binary':
             self._calibrate(test[features], test[target])
 
-    def predict(self, X, y=None):
-        """
-        Возвращает предсказания модели для входных данных
+    def _predict(self, X, model):
+        if self.task == 'binary':
+            prediction = self._predict_fold_binary(model, X)
+        elif self.task == 'multi':
+            prediction = self._predict_fold_multi(model, X)
+        elif self.task == 'regression':
+            prediction = self._predict_fold_regression(model, X)
+        else:
+            raise ValueError(f"Неподдерживаемый тип задачи: {self.task}")
 
-        Args:
-            X: Входные данные (DataFrame или numpy array с признаками)
-            y: Опциональные истинные метки (не используются в текущей реализации)
+        return prediction
 
-        Returns:
-            Предсказания модели
-        """
+    def predict_cv(self, X):
         if not self.models:
             raise ValueError("Модель не обучена")
 
         # Получаем предсказания для каждой модели
         predictions = []
         for model in self.models:
-            if self.task == 'binary':
-                # Вероятность положительного класса
-                fold_pred = self._predict_fold_binary(model, X)
-            elif self.task == 'multi':
-                # Вероятности всех классов
-                fold_pred = self._predict_fold_multi(model, X)
-            else:  # regression
-                # Предсказанное значение
-                fold_pred = self._predict_fold_regression(model, X)
-
-            predictions.append(fold_pred)
+            predictions.append(self._predict(X, model))
 
         # Усредняем предсказания по всем моделям
         if self.task == 'multi':
@@ -134,19 +111,14 @@ class BaseModel:
 
         return result
 
-    def evaluate(self, X, y):
-        """
-        Оценивает модель на тестовых данных
+    def evaluate(self, X, y, model=None, fold_idx=None):
+        # Если модель не указана, используем усредненные предсказания по всем моделям
+        # Если модель указана, используем предсказания конкретной модели
 
-        Args:
-            X: Признаки для оценки (DataFrame или numpy array)
-            y: Целевые значения
-
-        Returns:
-            Dict[str, float]: Словарь с метриками
-        """
-        # Получаем предсказания модели
-        y_pred = self.predict(X)
+        if model is None:
+            y_pred = self.predict_cv(X)
+        else:
+            y_pred = self._predict(X, model)
 
         metrics_list = self.get_metrics()
         metrics_dict = {}
@@ -154,6 +126,12 @@ class BaseModel:
         for metric in metrics_list:
             value = metric.calculate(y, y_pred)
             metrics_dict[metric.metric_name_with_params] = value
+
+        if model is not None and fold_idx is not None:
+            print(f"Fold {fold_idx+1}: {self.main_metric}: {metrics_dict[self.main_metric]:.4f}")
+        else:
+            for metric_name, metric_value in metrics_dict.items():
+                print(f"   {metric_name}: {metric_value:.4f}")
 
         return metrics_dict
 
@@ -240,7 +218,7 @@ class BaseModel:
             X: Данные для калибровки
             y: Целевые значения
         """
-        if self.calibrate not in ['betacal', 'isotonic']:
+        if self.task != 'binary':
             return
 
         print("Calibrating ...", end=" ")
@@ -255,9 +233,11 @@ class BaseModel:
         if self.calibrate == 'betacal':
             from betacal import BetaCalibration
             self.calibration_model = BetaCalibration()
-        else:  # isotonic
+        elif self.calibrate == 'isotonic':
             from sklearn.isotonic import IsotonicRegression
             self.calibration_model = IsotonicRegression(out_of_bounds='clip')
-        print("done")
+        else:
+            raise ValueError(f"Неподдерживаемый метод калибровки: {self.calibrate}")
 
         self.calibration_model.fit(proba.reshape(-1, 1), y)
+        print("done")

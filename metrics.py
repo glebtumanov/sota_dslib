@@ -8,6 +8,10 @@ from sklearn.metrics import (
     mean_absolute_percentage_error, mean_squared_log_error
 )
 
+# Направления оптимизации метрик
+MAXIMIZE = 1  # Чем больше, тем лучше
+MINIMIZE = -1  # Чем меньше, тем лучше
+
 # Определяем доступные метрики для каждого типа задачи
 BINARY_METRICS: Set[str] = {
     'accuracy', 'f1', 'precision', 'recall', 'roc_auc',
@@ -33,12 +37,40 @@ TASK_METRICS: Dict[str, Set[str]] = {
     'regression': REGRESSION_METRICS
 }
 
+# Направления оптимизации для метрик (MAXIMIZE - чем больше, тем лучше; MINIMIZE - чем меньше, тем лучше)
+METRIC_DIRECTIONS: Dict[str, int] = {
+    # Метрики классификации (больше - лучше)
+    'accuracy': MAXIMIZE,
+    'f1': MAXIMIZE,
+    'precision': MAXIMIZE,
+    'recall': MAXIMIZE,
+    'balanced_accuracy': MAXIMIZE,
+    'roc_auc': MAXIMIZE,
+    'ap': MAXIMIZE,
+    'top_k_accuracy': MAXIMIZE,
+    'precision@k': MAXIMIZE,
+    'recall@k': MAXIMIZE,
+    'f1@k': MAXIMIZE,
+
+    # Метрики классификации (меньше - лучше)
+    'log_loss': MINIMIZE,
+
+    # Метрики регрессии (меньше - лучше)
+    'mse': MINIMIZE,
+    'rmse': MINIMIZE,
+    'mae': MINIMIZE,
+    'mape': MINIMIZE,
+    'msle': MINIMIZE,
+    'rmsle': MINIMIZE,
+
+    # Метрики регрессии (больше - лучше)
+    'r2': MAXIMIZE
+}
+
 
 def parse_metric_string(metric_str: str) -> Tuple[str, Dict[str, Any]]:
     """
-    Парсит строку метрики с параметрами.
-
-    Формат: "metric_name;param1=value1;param2=value2"
+    Парсит строку метрики с параметрами в формате: "metric_name;param1=value1;param2=value2"
 
     Args:
         metric_str: Строка с названием метрики и параметрами
@@ -53,42 +85,66 @@ def parse_metric_string(metric_str: str) -> Tuple[str, Dict[str, Any]]:
     for part in parts[1:]:
         if '=' in part:
             key, value = part.split('=', 1)
-            # Попытка преобразования значения
+            # Преобразование значения к соответствующему типу
             try:
-                # Проверяем, является ли число
                 if '.' in value:
                     params[key] = float(value)
                 else:
                     params[key] = int(value)
             except ValueError:
-                # Check for boolean strings
                 if value.lower() == 'true':
                     params[key] = True
                 elif value.lower() == 'false':
                     params[key] = False
                 else:
-                    params[key] = value # Keep as string if not number or boolean
+                    params[key] = value
 
     return name, params
 
 
 class Metrics:
-    """
-    Класс для представления метрики с её параметрами и функцией расчёта.
-    """
+    """Класс для представления метрики с её параметрами и функцией расчёта."""
+
     def __init__(self, metric_name_with_params: str):
         """
         Инициализация метрики.
 
         Args:
-            name: Имя метрики
-            **params: Параметры метрики
+            metric_name_with_params: Имя метрики с параметрами в формате "имя;параметр1=значение1;..."
         """
         self.metric_name_with_params = metric_name_with_params
         self.name, self.params = parse_metric_string(metric_name_with_params)
 
-    # Всегда предполагаем что в calculate приходят y_pred сырые значения,
-    # то есть вероятности классов или регрессионные значения или распределение вероятностей по классам
+        # Словарь функций расчета метрик по их именам
+        self._metric_functions = {
+            # Метрики классификации (требующие классы)
+            'accuracy': self._calc_accuracy,
+            'f1': self._calc_f1,
+            'precision': self._calc_precision,
+            'recall': self._calc_recall,
+            'balanced_accuracy': self._calc_balanced_accuracy,
+
+            # Метрики классификации (требующие вероятности/скоры)
+            'roc_auc': self._calc_roc_auc,
+            'ap': self._calc_ap,
+            'log_loss': self._calc_log_loss,
+            'top_k_accuracy': self._calc_top_k_accuracy,
+
+            # Метрики @k
+            'precision@k': self._calc_precision_at_k,
+            'recall@k': self._calc_recall_at_k,
+            'f1@k': self._calc_f1_at_k,
+
+            # Метрики регрессии
+            'mse': self._calc_mse,
+            'rmse': self._calc_rmse,
+            'mae': self._calc_mae,
+            'r2': self._calc_r2,
+            'mape': self._calc_mape,
+            'msle': self._calc_msle,
+            'rmsle': self._calc_rmsle
+        }
+
     def calculate(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
         """
         Расчёт значения метрики.
@@ -100,247 +156,274 @@ class Metrics:
         Returns:
             float: Значение метрики
         """
-        # Преобразование данных для метрик, требующих классы
-        y_pred_classes = None
-        if self.name in ['accuracy', 'f1', 'precision', 'recall', 'balanced_accuracy']:
-            if y_pred.ndim > 1 and y_pred.shape[1] > 1: # Мультикласс
-                y_pred_classes = np.argmax(y_pred, axis=1)
-            elif y_pred.ndim == 1 or y_pred.shape[1] == 1: # Бинарный (или вероятности одного класса)
-                 # Ensure y_pred is 1D array for thresholding
-                _y_pred = y_pred.flatten() if y_pred.ndim > 1 else y_pred
-                threshold = self.params.get('threshold', 0.5)
-                y_pred_classes = (_y_pred >= threshold).astype(int)
-            else:
-                 y_pred_classes = y_pred # Already classes? Assume correct format
+        metric_func = self._metric_functions.get(self.name)
+        if not metric_func:
+            raise ValueError(f"Неизвестная метрика: {self.name}")
 
+        return metric_func(y_true, y_pred)
 
-        # --- Метрики классификации (требующие классы) ---
-        if self.name == 'accuracy':
-            return accuracy_score(y_true, y_pred_classes, **self.params)
-        elif self.name == 'f1':
-            # 'average' parameter handled by self.params
-            return f1_score(y_true, y_pred_classes, **self.params)
-        elif self.name == 'precision':
-             # 'average' parameter handled by self.params
-            return precision_score(y_true, y_pred_classes, **self.params)
-        elif self.name == 'recall':
-             # 'average' parameter handled by self.params
-            return recall_score(y_true, y_pred_classes, **self.params)
-        elif self.name == 'balanced_accuracy':
-            # 'adjusted' параметр специфичен для sklearn
-            return balanced_accuracy_score(y_true, y_pred_classes, adjusted=self.params.get('adjusted', False))
+    def _prepare_classification_data(self, y_true: np.ndarray, y_pred: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Подготавливает данные для метрик классификации.
 
-        # --- Метрики классификации (требующие вероятности/скоры) ---
-        elif self.name == 'roc_auc':
-            if y_pred.ndim > 1 and y_pred.shape[1] > 1: # Мультикласс
-                # 'ovo'/'ovr' handled by params if needed
-                return roc_auc_score(y_true, y_pred, **self.params)
-            else: # Бинарный
-                 # Ensure y_pred is 1D array of scores/probabilities
-                _y_pred_roc = y_pred.flatten() if y_pred.ndim > 1 else y_pred
-                return roc_auc_score(y_true, _y_pred_roc, **self.params)
-        elif self.name == 'ap': # average_precision_score
-            # 'average' параметр handled by self.params
-             # Binary case y_pred shape could be (n,) or (n, 1)
-            _y_pred_for_ap = y_pred
-            if y_pred.ndim > 1 and y_pred.shape[1] > 1: # Multiclass, y_true should be one-hot for micro/macro? No, sklearn handles label indicators
-                 pass # Keep y_pred as is for multiclass
-            elif y_pred.ndim > 1 and y_pred.shape[1] == 1: # Binary (n, 1) -> (n,)
-                 _y_pred_for_ap = y_pred.flatten()
-            # else: binary (n,), keep as is
+        Args:
+            y_true: Истинные значения
+            y_pred: Предсказанные значения/вероятности
 
-            # Ensure y_true format matches expectation based on average parameter if needed
-            # Sklearn's average_precision_score usually handles label indicator format for multiclass directly
-            return average_precision_score(y_true, _y_pred_for_ap, **self.params)
-
-        elif self.name == 'log_loss':
-             # Requires probabilities. Sklearn handles binary/multiclass.
-             # Ensure y_pred has shape (n_samples, n_classes) for multiclass
-             # and (n_samples,) for binary (or (n_samples, 2) but only proba of positive class needed)
-             _y_pred_for_logloss = y_pred
-             is_binary = len(np.unique(y_true)) <= 2 # Basic check, might need refinement
-             if is_binary and y_pred.ndim > 1 and y_pred.shape[1] == 2:
-                 _y_pred_for_logloss = y_pred[:, 1] # Use proba of positive class
-             elif is_binary and y_pred.ndim > 1 and y_pred.shape[1] == 1:
-                 _y_pred_for_logloss = y_pred.flatten()
-
-             # Clip preds for numerical stability - log_loss handles eps parameter
-             # eps = np.finfo(y_pred.dtype).eps
-             # _y_pred_for_logloss = np.clip(_y_pred_for_logloss, eps, 1 - eps)
-
-             return log_loss(y_true, _y_pred_for_logloss, **self.params) # eps handled by default
-        elif self.name == 'top_k_accuracy':
-            # Requires probabilities y_pred shape (n_samples, n_classes)
-            # Parameter k is integer, handled by self.params
-            k = self.params.get('k')
-            if k is None:
-                raise ValueError("Parameter 'k' is required for top_k_accuracy")
-            if not isinstance(k, int):
-                 raise ValueError(f"Parameter 'k' must be an integer for top_k_accuracy, got {k}")
-            if y_pred.ndim == 1:
-                 raise ValueError("top_k_accuracy requires class probabilities (y_pred with shape (n_samples, n_classes))")
-             # Ensure labels parameter is correctly passed if needed for specific classes
-            labels = self.params.get('labels', None) # Or derive from y_true/y_pred if necessary
-            if labels is None and y_pred.shape[1] > 1: # Only derive labels if multiclass probabilities are provided
-                labels = np.arange(y_pred.shape[1]) # Assume classes 0 to n_classes-1
-
-            return top_k_accuracy_score(y_true, y_pred, k=k, labels=labels, **{p:v for p,v in self.params.items() if p not in ['k', 'labels']})
-
-
-        # --- Метрики @k (на топ K% выборки) ---
-        elif self.name == 'precision@k':
-            k_perc = self.params.get('k')
-            if k_perc is None: raise ValueError("Parameter 'k' (percentage) is required for precision@k")
-            return self._precision_at_k(y_true, y_pred, k=float(k_perc))
-        elif self.name == 'recall@k':
-            k_perc = self.params.get('k')
-            if k_perc is None: raise ValueError("Parameter 'k' (percentage) is required for recall@k")
-            return self._recall_at_k(y_true, y_pred, k=float(k_perc))
-        elif self.name == 'f1@k':
-            k_perc = self.params.get('k')
-            if k_perc is None: raise ValueError("Parameter 'k' (percentage) is required for f1@k")
-            return self._f1_at_k(y_true, y_pred, k=float(k_perc))
-
-
-        # --- Метрики регрессии ---
-        elif self.name == 'mse':
-            return mean_squared_error(y_true, y_pred, **self.params)
-        elif self.name == 'rmse':
-            return np.sqrt(mean_squared_error(y_true, y_pred, **self.params))
-        elif self.name == 'mae':
-            return mean_absolute_error(y_true, y_pred, **self.params)
-        elif self.name == 'r2':
-            return r2_score(y_true, y_pred, **self.params)
-        elif self.name == 'mape':
-             # Handle potential zero values in y_true if necessary, sklearn does this
-            return mean_absolute_percentage_error(y_true, y_pred, **self.params)
-        elif self.name == 'msle':
-            # Requires non-negative y_true and y_pred
-            if np.any(y_true < 0) or np.any(y_pred < 0):
-                 # Adjust negative predictions to 0 or raise error? Let's adjust for robustness.
-                 print("Warning: Negative values detected for MSLE calculation. Clipping predictions to 0.")
-                 y_pred = np.maximum(y_pred, 0)
-                 if np.any(y_true < 0): # True values cannot be negative
-                     raise ValueError("MSLE requires non-negative true values (y_true).")
-
-            return mean_squared_log_error(y_true, y_pred, **self.params)
-        elif self.name == 'rmsle':
-            # Requires non-negative y_true and y_pred
-            if np.any(y_true < 0) or np.any(y_pred < 0):
-                 # Adjust negative predictions to 0 or raise error? Let's adjust.
-                 print("Warning: Negative values detected for RMSLE calculation. Clipping predictions to 0.")
-                 y_pred = np.maximum(y_pred, 0)
-                 if np.any(y_true < 0): # True values cannot be negative
-                     raise ValueError("RMSLE requires non-negative true values (y_true).")
-
-            # Calculate MSLE first
-            msle_val = mean_squared_log_error(y_true, y_pred, **self.params)
-            return np.sqrt(msle_val)
-
-
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: (y_true, y_pred_classes)
+        """
+        if y_pred.ndim > 1 and y_pred.shape[1] > 1:  # Мультиклассовая классификация
+            y_pred_classes = np.argmax(y_pred, axis=1)
+        elif y_pred.ndim == 1 or y_pred.shape[1] == 1:  # Бинарная классификация
+            _y_pred = y_pred.flatten() if y_pred.ndim > 1 else y_pred
+            threshold = self.params.get('threshold', 0.5)
+            y_pred_classes = (_y_pred >= threshold).astype(int)
         else:
-            raise ValueError(f"Unknown metric: {self.name}")
+            y_pred_classes = y_pred  # Предполагаем, что это уже классы
 
-    @staticmethod
-    def _get_scores_for_k_metrics(y_scores: np.ndarray) -> np.ndarray:
-        """Helper to extract relevant scores for @k metrics (binary/multiclass)."""
+        return y_true, y_pred_classes
+
+    def _prepare_regression_data(self, y_true: np.ndarray, y_pred: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Подготавливает данные для метрик регрессии.
+
+        Args:
+            y_true: Истинные значения
+            y_pred: Предсказанные значения
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: (y_true, y_pred)
+        """
+        # Для регрессии обычно просто приводим к плоскому виду
+        if y_pred.ndim > 1 and y_pred.shape[1] == 1:
+            y_pred = y_pred.flatten()
+        return y_true, y_pred
+
+    # Метрики классификации (требующие классы)
+    def _calc_accuracy(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        y_true, y_pred_classes = self._prepare_classification_data(y_true, y_pred)
+        return accuracy_score(y_true, y_pred_classes, **self.params)
+
+    def _calc_f1(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        y_true, y_pred_classes = self._prepare_classification_data(y_true, y_pred)
+        return f1_score(y_true, y_pred_classes, **self.params)
+
+    def _calc_precision(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        y_true, y_pred_classes = self._prepare_classification_data(y_true, y_pred)
+        return precision_score(y_true, y_pred_classes, **self.params)
+
+    def _calc_recall(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        y_true, y_pred_classes = self._prepare_classification_data(y_true, y_pred)
+        return recall_score(y_true, y_pred_classes, **self.params)
+
+    def _calc_balanced_accuracy(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        y_true, y_pred_classes = self._prepare_classification_data(y_true, y_pred)
+        return balanced_accuracy_score(y_true, y_pred_classes, adjusted=self.params.get('adjusted', False))
+
+    # Метрики классификации (требующие вероятности/скоры)
+    def _calc_roc_auc(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        if y_pred.ndim > 1 and y_pred.shape[1] > 1:  # Мультиклассовая классификация
+            return roc_auc_score(y_true, y_pred, **self.params)
+        else:  # Бинарная классификация
+            _y_pred_roc = y_pred.flatten() if y_pred.ndim > 1 else y_pred
+            return roc_auc_score(y_true, _y_pred_roc, **self.params)
+
+    def _calc_ap(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        _y_pred_for_ap = y_pred
+        if y_pred.ndim > 1 and y_pred.shape[1] == 1:
+            _y_pred_for_ap = y_pred.flatten()
+        return average_precision_score(y_true, _y_pred_for_ap, **self.params)
+
+    def _calc_log_loss(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        _y_pred_for_logloss = y_pred
+        is_binary = len(np.unique(y_true)) <= 2
+
+        if is_binary and y_pred.ndim > 1 and y_pred.shape[1] == 2:
+            _y_pred_for_logloss = y_pred[:, 1]  # Используем вероятность положительного класса
+        elif is_binary and y_pred.ndim > 1 and y_pred.shape[1] == 1:
+            _y_pred_for_logloss = y_pred.flatten()
+
+        return log_loss(y_true, _y_pred_for_logloss, **self.params)
+
+    def _calc_top_k_accuracy(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        k = self.params.get('k')
+        if k is None:
+            raise ValueError("Параметр 'k' обязателен для top_k_accuracy")
+
+        if not isinstance(k, int):
+            raise ValueError(f"Параметр 'k' должен быть целым числом для top_k_accuracy, получено {k}")
+
+        if y_pred.ndim == 1:
+            raise ValueError("top_k_accuracy требует вероятностей классов (размерность y_pred: (n_samples, n_classes))")
+
+        labels = self.params.get('labels')
+        if labels is None and y_pred.shape[1] > 1:
+            labels = np.arange(y_pred.shape[1])
+
+        filtered_params = {p: v for p, v in self.params.items() if p not in ['k', 'labels']}
+        return top_k_accuracy_score(y_true, y_pred, k=k, labels=labels, **filtered_params)
+
+    # Метрики @k
+    def _get_scores_for_k_metrics(self, y_scores: np.ndarray) -> np.ndarray:
+        """Извлекает соответствующие скоры для метрик @k."""
         if y_scores.ndim > 1 and y_scores.shape[1] > 1:
-            # Multiclass: Use probability of the positive class (assumed class 1)
-            # Or handle differently based on specific needs?
-            # For now, default to class 1 for recall/precision @ k concept.
-            # This might need refinement depending on the exact use case for multiclass @k.
-            if y_scores.shape[1] == 2: # Binary classifier outputting two columns
+            if y_scores.shape[1] == 2:  # Бинарный классификатор с двумя столбцами
                 return y_scores[:, 1]
             else:
-                # What score to use for multiclass? This is ambiguous.
-                # Defaulting to max probability across classes as the 'score'.
-                # Or maybe it should be applied per class?
-                # Sticking to max probability for now.
-                # Consider adding a parameter to specify which class probability to use or how to aggregate.
-                print("Warning: Using max probability as score for multiclass @k metrics. Interpretation might vary.")
+                # Для мультиклассового случая используем максимальную вероятность
                 return np.max(y_scores, axis=1)
         elif y_scores.ndim > 1 and y_scores.shape[1] == 1:
-             return y_scores.flatten() # Case like (n, 1)
+            return y_scores.flatten()
         else:
-            return y_scores # Assumed binary (n,) or already processed scores
+            return y_scores
 
-    def _recall_at_k(self, y_true: np.ndarray, y_scores: np.ndarray, k: float) -> float:
+    def _calc_precision_at_k(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        k_perc = self.params.get('k')
+        if k_perc is None:
+            raise ValueError("Параметр 'k' (процент) обязателен для precision@k")
+
+        return self._precision_at_k(y_true, y_pred, k=float(k_perc))
+
+    def _calc_recall_at_k(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        k_perc = self.params.get('k')
+        if k_perc is None:
+            raise ValueError("Параметр 'k' (процент) обязателен для recall@k")
+
+        return self._recall_at_k(y_true, y_pred, k=float(k_perc))
+
+    def _calc_f1_at_k(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        k_perc = self.params.get('k')
+        if k_perc is None:
+            raise ValueError("Параметр 'k' (процент) обязателен для f1@k")
+
+        return self._f1_at_k(y_true, y_pred, k=float(k_perc))
+
+    def _precision_at_k(self, y_true: np.ndarray, y_scores: np.ndarray, k: float) -> float:
         """
-        Recall at k percent of samples.
-        Assumes binary classification (0/1) or treats multiclass y_true as binary based on the positive class implicitly chosen by _get_scores_for_k_metrics.
+        Точность на k проценте выборки.
         """
         assert 0.0 <= k <= 1.0, "k должно быть от 0 до 1"
         y_true = np.asarray(y_true)
-        scores = self._get_scores_for_k_metrics(np.asarray(y_scores)) # Get relevant scores
+        scores = self._get_scores_for_k_metrics(np.asarray(y_scores))
 
-        # Identify positive class label (assuming 1 for binary, needs care for multiclass)
-        # Let's assume the goal is recall of class '1' if y_true is binary-like (0s and 1s)
+        top_n = int(len(scores) * k)
+        if top_n == 0:
+            return 0.0
+
+        top_indices = np.argsort(scores)[::-1][:top_n]
+        positive_label = 1
+
+        if len(np.unique(y_true)) > 2:
+            print(f"Внимание: вычисление precision@k предполагает, что положительный класс - {positive_label}")
+
+        num_true_positives_at_k = np.sum(y_true[top_indices] == positive_label)
+        return num_true_positives_at_k / top_n
+
+    def _recall_at_k(self, y_true: np.ndarray, y_scores: np.ndarray, k: float) -> float:
+        """
+        Полнота на k проценте выборки.
+        """
+        assert 0.0 <= k <= 1.0, "k должно быть от 0 до 1"
+        y_true = np.asarray(y_true)
+        scores = self._get_scores_for_k_metrics(np.asarray(y_scores))
+
         positive_label = 1
         if len(np.unique(y_true)) > 2:
-             # How to handle multiclass recall@k? Calculate for a specific class?
-             # For now, continue assuming we want recall for class '1' vs rest.
-             print(f"Warning: Calculating recall@k assuming positive class is {positive_label} for potentially multiclass true labels.")
+            print(f"Внимание: вычисление recall@k предполагает, что положительный класс - {positive_label}")
 
         num_positive_true = np.sum(y_true == positive_label)
         if num_positive_true == 0:
-             # If there are no true positive samples, recall is undefined or 0/0.
-             # Scikit-learn returns 0 in this case for precision/recall if no true samples exist.
             return 0.0
 
         top_n = int(len(scores) * k)
         if top_n == 0:
             return 0.0
 
-        # Indices of top N scores
         top_indices = np.argsort(scores)[::-1][:top_n]
-
-        # Number of true positives among top N predictions
         num_true_positives_at_k = np.sum(y_true[top_indices] == positive_label)
 
         return num_true_positives_at_k / num_positive_true
 
-
-    def _precision_at_k(self, y_true: np.ndarray, y_scores: np.ndarray, k: float) -> float:
-        """
-        Precision at k percent of samples.
-        Assumes binary classification (0/1) or treats multiclass y_true as binary based on the positive class implicitly chosen by _get_scores_for_k_metrics.
-        """
-        assert 0.0 <= k <= 1.0, "k должно быть от 0 до 1"
-        y_true = np.asarray(y_true)
-        scores = self._get_scores_for_k_metrics(np.asarray(y_scores)) # Get relevant scores
-
-        top_n = int(len(scores) * k)
-        if top_n == 0:
-             # If we select 0 items, precision is arguably undefined or 0/0.
-             # Scikit-learn returns 0 if TP+FP = 0.
-            return 0.0
-
-        # Indices of top N scores
-        top_indices = np.argsort(scores)[::-1][:top_n]
-
-        # Identify positive class label (assuming 1 for binary)
-        positive_label = 1
-        if len(np.unique(y_true)) > 2:
-             print(f"Warning: Calculating precision@k assuming positive class is {positive_label} for potentially multiclass true labels.")
-
-
-        # Number of true positives among top N predictions
-        num_true_positives_at_k = np.sum(y_true[top_indices] == positive_label)
-
-        return num_true_positives_at_k / top_n
-
     def _f1_at_k(self, y_true: np.ndarray, y_scores: np.ndarray, k: float) -> float:
-        """F1 score at k percent of samples."""
+        """F1-мера на k проценте выборки."""
         precision_k = self._precision_at_k(y_true, y_scores, k)
         recall_k = self._recall_at_k(y_true, y_scores, k)
 
-        # F1 = 2 * (precision * recall) / (precision + recall)
         denominator = precision_k + recall_k
         if denominator == 0:
             return 0.0
         else:
             return 2 * (precision_k * recall_k) / denominator
 
+    # Метрики регрессии
+    def _calc_mse(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        y_true, y_pred = self._prepare_regression_data(y_true, y_pred)
+        return mean_squared_error(y_true, y_pred, **self.params)
+
+    def _calc_rmse(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        y_true, y_pred = self._prepare_regression_data(y_true, y_pred)
+        return np.sqrt(mean_squared_error(y_true, y_pred, **self.params))
+
+    def _calc_mae(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        y_true, y_pred = self._prepare_regression_data(y_true, y_pred)
+        return mean_absolute_error(y_true, y_pred, **self.params)
+
+    def _calc_r2(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        y_true, y_pred = self._prepare_regression_data(y_true, y_pred)
+        return r2_score(y_true, y_pred, **self.params)
+
+    def _calc_mape(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        y_true, y_pred = self._prepare_regression_data(y_true, y_pred)
+        return mean_absolute_percentage_error(y_true, y_pred, **self.params)
+
+    def _calc_msle(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        y_true, y_pred = self._prepare_regression_data(y_true, y_pred)
+
+        if np.any(y_true < 0) or np.any(y_pred < 0):
+            y_pred = np.maximum(y_pred, 0)
+            if np.any(y_true < 0):
+                raise ValueError("MSLE требует неотрицательных истинных значений (y_true).")
+
+        return mean_squared_log_error(y_true, y_pred, **self.params)
+
+    def _calc_rmsle(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        y_true, y_pred = self._prepare_regression_data(y_true, y_pred)
+
+        if np.any(y_true < 0) or np.any(y_pred < 0):
+            y_pred = np.maximum(y_pred, 0)
+            if np.any(y_true < 0):
+                raise ValueError("RMSLE требует неотрицательных истинных значений (y_true).")
+
+        msle_val = mean_squared_log_error(y_true, y_pred, **self.params)
+        return np.sqrt(msle_val)
+
     def __repr__(self) -> str:
         params_str = ', '.join(f"{k}={v}" for k, v in self.params.items())
         return f"Metric(name='{self.name}', params={{{params_str}}})"
+
+
+def get_best_model_by_metric(metrics_results: Dict[str, Dict[str, float]], main_metric: str) -> Tuple[str, float]:
+    """
+    Определяет лучшую модель по указанной метрике с учетом направления оптимизации.
+
+    Args:
+        metrics_results: Словарь вида {модель: {метрика: значение}}
+        main_metric: Ключ метрики для сравнения
+
+    Returns:
+        Tuple[str, float]: (имя лучшей модели, значение метрики)
+    """
+    if not metrics_results:
+        raise ValueError("metrics_results не может быть пустым")
+
+    # Получаем направление оптимизации метрики (по умолчанию MAXIMIZE)
+    direction = METRIC_DIRECTIONS.get(main_metric, MAXIMIZE)
+
+    # Находим лучшую модель
+    if direction == MAXIMIZE:
+        best_model = max(metrics_results, key=lambda m: metrics_results[m].get(main_metric, 0))
+    else:  # MINIMIZE
+        best_model = min(metrics_results, key=lambda m: metrics_results[m].get(main_metric, float('inf')))
+
+    return best_model, metrics_results[best_model].get(main_metric, 0)

@@ -5,6 +5,7 @@ import numpy as np
 import joblib
 from sklearn.model_selection import train_test_split
 from datetime import datetime
+from metrics import get_best_model_by_metric
 
 class SOTAModels:
     def __init__(self, config_path):
@@ -253,6 +254,49 @@ class SOTAModels:
 
         return self.model
 
+    def train_models(self):
+        """
+        Последовательно обучает все модели из списка selected_models
+        """
+        # Разделение данных перед обучением
+        self._split_data()
+
+        # Сэмплирование данных, если задано
+        self._sampling()
+
+        # Обучение всех выбранных моделей
+        for model_type in self.selected_models:
+            print('-' * 10)
+            print(f"Обучение модели: {model_type} на {self.n_folds} фолдах, тип задачи: {self.task}")
+
+            # Обучение модели
+            model = self._train_model(model_type)
+
+            # Сохранение модели в словаре
+            self.trained_models[model_type] = model
+
+            # Вычисление метрик на тестовых данных через интерфейс модели
+            print(f"Метрики на валидационных данных (out-of-time):")
+            metrics_result = model.evaluate(
+                self.valid_df[self.selected_features],
+                self.valid_df[self.target_col],
+            )
+
+            self.metrics_results[model_type] = metrics_result
+
+            # Сохраняем модель вместе с калибровкой (если есть)
+            metric_value = metrics_result.get(self.main_metric, 0)
+            self._save_model(model_type, model, metric_value)
+
+            print()
+
+        # Вывод лучшей модели по основной метрике
+        best_model, best_metric_value = get_best_model_by_metric(self.metrics_results, self.main_metric)
+        print(f"Лучшая модель по метрике {self.main_metric}: {best_model}")
+        print(f"Значение метрики: {best_metric_value}")
+
+        return self.trained_models, self.metrics_results
+
     def _save_model(self, model_type, model, metric_value):
         """
         Сохраняет обученную модель и калибровочную модель (если есть) в директорию model_dir
@@ -282,47 +326,6 @@ class SOTAModels:
 
         if self.verbose:
             print(f"Модель {model_type} сохранена в {file_path}")
-
-    def train_models(self):
-        """
-        Последовательно обучает все модели из списка selected_models
-        """
-        # Разделение данных перед обучением
-        self._split_data()
-
-        # Сэмплирование данных, если задано
-        self._sampling()
-
-        # Обучение всех выбранных моделей
-        for model_type in self.selected_models:
-            print('-' * 10)
-            print(f"Обучение модели: {model_type} на {self.n_folds} фолдах, тип задачи: {self.task}")
-
-            # Обучение модели
-            model = self._train_model(model_type)
-
-            # Сохранение модели в словаре
-            self.trained_models[model_type] = model
-
-            # Вычисление метрик на тестовых данных через интерфейс модели
-            metrics_result = model.evaluate(self.valid_df[self.selected_features], self.valid_df[self.target_col])
-
-            self.metrics_results[model_type] = metrics_result
-
-            # Сохраняем модель вместе с калибровкой (если есть)
-            metric_value = metrics_result.get(self.main_metric, 0)
-            self._save_model(model_type, model, metric_value)
-
-            # print(f"Результаты модели {model_type}: {self.metrics_results[model_type]}")
-            print()
-
-        # Вывод лучшей модели по основной метрике
-        best_model = max(self.metrics_results, key=lambda m: self.metrics_results[m].get(self.main_metric, 0))
-        print(f"Лучшая модель по метрике {self.main_metric}: {best_model}")
-        print(f"Значение метрики: {self.metrics_results[best_model].get(self.main_metric, 0)}")
-
-        return self.trained_models, self.metrics_results
-
 
 if __name__ == '__main__':
     modelling = SOTAModels('my_config.yaml')
