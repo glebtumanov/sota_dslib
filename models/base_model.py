@@ -142,12 +142,23 @@ class BaseModel:
         Returns:
             dict: Гиперпараметры модели
         """
-        if self.task == 'binary':
-            return self._get_default_hp_binary() if self.hp is None else self.hp
-        elif self.task == 'multi':
-            return self._get_default_hp_multi() if self.hp is None else self.hp
-        elif self.task == 'regression':
-            return self._get_default_hp_regression() if self.hp is None else self.hp
+        if self.hp is None:
+            if self.task == 'binary':
+                return self._get_default_hp_binary()
+            elif self.task == 'multi':
+                return self._get_default_hp_multi()
+            elif self.task == 'regression':
+                return self._get_default_hp_regression()
+        else:
+            if self.task == 'binary':
+                self.hp.update(self._get_required_hp_binary())
+                return self.hp
+            elif self.task == 'multi':
+                self.hp.update(self._get_required_hp_multi())
+                return self.hp
+            elif self.task == 'regression':
+                self.hp.update(self._get_required_hp_regression())
+                return self.hp
 
     def get_metrics(self):
         """
@@ -189,6 +200,17 @@ class BaseModel:
     def _predict_fold_regression(self, model, X):
         raise NotImplementedError("Метод _predict_regression_fold должен быть реализован в дочернем классе")
 
+    # Специфичные для каждого типа задачи обязательные гиперпараметры
+    def _get_required_hp_binary(self):
+        return {}
+
+    def _get_required_hp_multi(self):
+        return {}
+
+    def _get_required_hp_regression(self):
+        return {}
+
+    # Гиперпараметры по умолчанию, если в конфиге не указаны (use_custom_hyperparameters = false)
     def _get_default_hp_binary(self):
         return {}
 

@@ -47,6 +47,15 @@ class XGBoostModel(BaseModel):
     def _predict_fold_regression(self, model, X):
         return model.predict(X)
 
+    def _get_required_hp_binary(self):
+        return {'eval_metric': 'auc'}
+
+    def _get_required_hp_multi(self):
+        return {'eval_metric': 'mlogloss'}
+
+    def _get_required_hp_regression(self):
+        return {'eval_metric': 'rmse'}
+
     def _get_default_hp_binary(self):
         return {
             'eval_metric': 'auc',

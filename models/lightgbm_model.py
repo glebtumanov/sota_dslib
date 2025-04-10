@@ -50,6 +50,15 @@ class LightGBMModel(BaseModel):
     def _predict_fold_regression(self, model, X):
         return model.predict(X)
 
+    def _get_required_hp_binary(self):
+        return {'metric': 'auc'}
+
+    def _get_required_hp_multi(self):
+        return {'metric': 'multi_logloss'}
+
+    def _get_required_hp_regression(self):
+        return {'metric': 'rmse'}
+
     def _get_default_hp_binary(self):
         return {
             'metric': 'auc',
@@ -58,14 +67,16 @@ class LightGBMModel(BaseModel):
             'n_jobs': 4,
             'class_weight': 'balanced',
             'random_state': 42,
-            'max_depth': 10,
+            'max_depth': 8,
             'min_child_samples': 50,
             'reg_lambda': 10.0,
-            'num_leaves': 31,
+            'num_leaves': 255,
             'colsample_bytree': 0.5,
             'subsample': 0.8,
             'verbose': -1,
             'importance_type': 'gain',
+            'silent': True,
+            'verbosity': -1
         }
 
     def _get_default_hp_multi(self):
@@ -84,6 +95,8 @@ class LightGBMModel(BaseModel):
             'subsample': 0.8,
             'verbose': -1,
             'importance_type': 'gain',
+            'silent': True,
+            'verbosity': -1
         }
 
     def _get_default_hp_regression(self):
@@ -101,4 +114,6 @@ class LightGBMModel(BaseModel):
             'subsample': 0.8,
             'verbose': -1,
             'importance_type': 'gain',
+            'silent': True,
+            'verbosity': -1
         }

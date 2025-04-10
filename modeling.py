@@ -99,25 +99,19 @@ class SOTAModels:
         # Гиперпараметры и настройки моделей
         self.hp = {}
         self.model_n_folds = {}
-        self.use_custom_hyperparameters = {}
+        self.model_hyperparameters = {}
 
         # Заполняем параметры моделей
         for model_type in self.selected_models:
             model_config = self.models_config.get(model_type, {})
 
+            self.use_custom_hyperparameters = model_config.get('use_custom_hyperparameters', False)
+
+            if self.use_custom_hyperparameters:
+                self.hp[model_type] = model_config.get('hyperparameters', {})
+
             # Количество фолдов для кросс-валидации
             self.model_n_folds[model_type] = model_config.get('n_folds', self.n_folds)
-
-            # Флаг использования пользовательских гиперпараметров
-            self.use_custom_hyperparameters[model_type] = model_config.get('use_custom_hyperparameters', False)
-
-            # Получаем гиперпараметры
-            if self.use_custom_hyperparameters[model_type]:
-                self.hp[model_type] = model_config.get('hyperparameters', {})
-            else:
-                # Если не используем кастомные гиперпараметры, то оставляем пустой словарь
-                # и модель будет использовать дефолтные значения
-                self.hp[model_type] = {}
 
         # Инициализация контейнеров для хранения результатов
         self.trained_models = {}

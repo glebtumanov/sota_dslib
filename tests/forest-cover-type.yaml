@@ -9,9 +9,10 @@ common:
     model_dir: "/home/gleb/models" # пути сохранения обученных моделей
     skip_cols: []
     selected_models:
-        - xgboost
-        - lightgbm
+        - random_forest
         - catboost
+        - lightgbm
+        - xgboost
 
 split_data:
     test_rate: 0.2
@@ -48,36 +49,66 @@ calibration:
 models:
     catboost:
         n_folds: 3
-        use_custom_hyperparameters: false
+        use_custom_hyperparameters: true
         hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
+            eval_metric: 'AUC'
+            iterations: 1000
+            early_stopping_rounds: 200
+            thread_count: 4
+            auto_class_weights: 'SqrtBalanced'
+            random_seed: 42
             depth: 10
-            learning_rate: 0.01
-            l2_leaf_reg: 3
-            random_strength: 1
-            bagging_temperature: 1
+            min_data_in_leaf: 1
+            l2_leaf_reg: 1.0
+            border_count: 64
+            rsm: 0.5
+            subsample: 0.8
     lightgbm:
         n_folds: 3
-        use_custom_hyperparameters: false
-        hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
-            depth: 10
-            learning_rate: 0.01
-            l2_leaf_reg: 3
-            random_strength: 1
-            bagging_temperature: 1
+        use_custom_hyperparameters: true
+        hyperparameters:
+            boosting_type: 'gbdt'
+            num_boost_round: 1000
+            metric: 'auc'
+            n_jobs: 12
+            verbosity: -1
+            seed: 77
+            max_depth: 16
+            num_leaves: 63
+            learning_rate: 0.06
+            min_child_samples: 4
+            colsample_bytree: 0.3
+            subsample: 0.85
+            subsample_freq: 10
+            max_bin: 100
+            min_child_weight: 1.0
+            min_split_gain: 0.015
+            reg_lambda: 5.6
+            reg_alpha: 0.5
+            early_stopping_rounds: 100
+            silent: True
     xgboost:
         n_folds: 3
-        use_custom_hyperparameters: false
-        hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
-            depth: 10
-            learning_rate: 0.01
-            l2_leaf_reg: 3
-            random_strength: 1
-            bagging_temperature: 1
+        use_custom_hyperparameters: true
+        hyperparameters:
+            n_estimators: 1000
+            n_jobs: 16
+            eval_metric: 'auc'
+            early_stopping_rounds: 200
+            tree_method: 'hist'
+            max_depth: 10
+            learning_rate: 0.03
+            max_bin: 100
+            subsample: 0.9
+            colsample_bylevel: 0.5
     random_forest:
         n_folds: 3
-        use_custom_hyperparameters: false
-        hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
-            depth: 10
-            learning_rate: 0.01
-            l2_leaf_reg: 3
-            random_strength: 1
+        use_custom_hyperparameters: true
+        hyperparameters:
+            n_jobs: -1
+            random_state: 5
+            n_estimators: 1000
+            max_depth: 100
+            max_samples: 0.5
+            bootstrap: true
+            verbose: 0

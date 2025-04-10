@@ -50,6 +50,15 @@ class CatBoostModel(BaseModel):
     def _predict_fold_regression(self, model, X):
         return model.predict(X)
 
+    def _get_required_hp_binary(self):
+        return {'eval_metric': 'AUC', 'bootstrap_type': 'Bernoulli'}
+
+    def _get_required_hp_multi(self):
+        return {'eval_metric': 'MultiClass', 'bootstrap_type': 'MVS'}
+
+    def _get_required_hp_regression(self):
+        return {'eval_metric': 'RMSE', 'bootstrap_type': 'Poisson'}
+
     def _get_default_hp_binary(self):
         return {
             'eval_metric': 'AUC',
@@ -58,16 +67,7 @@ class CatBoostModel(BaseModel):
             'thread_count': 4,
             'auto_class_weights': 'Balanced',
             'random_seed': 42,
-            'depth': 10,
-            'min_data_in_leaf': 50,
-            'l2_leaf_reg': 10.0,
-            'border_count': 50,
-            'rsm': 0.5,
-            'subsample': 0.8,
-            'allow_writing_files': False,
             'verbose': False,
-            'use_best_model': False,
-            'train_dir': '/tmp',
         }
 
     def _get_default_hp_multi(self):
@@ -76,18 +76,9 @@ class CatBoostModel(BaseModel):
             'iterations': 1000,
             'early_stopping_rounds': 20,
             'thread_count': 4,
-            'auto_class_weights': 'Balanced',
+            'auto_class_weights': 'SqrtBalanced',
             'random_seed': 42,
-            'depth': 10,
-            'min_data_in_leaf': 50,
-            'l2_leaf_reg': 10.0,
-            'border_count': 50,
-            'rsm': 0.5,
-            'subsample': 0.8,
-            'allow_writing_files': False,
             'verbose': False,
-            'use_best_model': False,
-            'train_dir': '/tmp',
         }
 
     def _get_default_hp_regression(self):
@@ -97,14 +88,5 @@ class CatBoostModel(BaseModel):
             'early_stopping_rounds': 20,
             'thread_count': 4,
             'random_seed': 42,
-            'depth': 10,
-            'min_data_in_leaf': 50,
-            'l2_leaf_reg': 10.0,
-            'border_count': 50,
-            'rsm': 0.5,
-            'subsample': 0.8,
-            'allow_writing_files': False,
             'verbose': False,
-            'use_best_model': False,
-            'train_dir': '/tmp',
         }

@@ -9,9 +9,10 @@ common:
     model_dir: "/home/gleb/models" # пути сохранения обученных моделей
     skip_cols: []
     selected_models:
-        - xgboost
-        - lightgbm
+        - random_forest
         - catboost
+        - lightgbm
+        - xgboost
 
 split_data:
     test_rate: 0.2
@@ -58,7 +59,7 @@ models:
     lightgbm:
         n_folds: 3
         use_custom_hyperparameters: false
-        hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
+        hyperparameters:
             depth: 10
             learning_rate: 0.01
             l2_leaf_reg: 3
@@ -67,7 +68,7 @@ models:
     xgboost:
         n_folds: 3
         use_custom_hyperparameters: false
-        hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
+        hyperparameters:
             depth: 10
             learning_rate: 0.01
             l2_leaf_reg: 3
@@ -76,7 +77,7 @@ models:
     random_forest:
         n_folds: 3
         use_custom_hyperparameters: false
-        hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
+        hyperparameters:
             depth: 10
             learning_rate: 0.01
             l2_leaf_reg: 3
