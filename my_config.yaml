@@ -1,5 +1,5 @@
 common:
-    task: "binary" # binary, multi, regression
+    task: "binary" # binary, multiclass, regression
     metrics:
         - f1
         - roc_auc

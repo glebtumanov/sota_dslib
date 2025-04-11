@@ -34,7 +34,7 @@ class LightAutoMLModel(BaseModel):
         task = Task("binary", metric="auc", greater_is_better=True)
         return self._train_fold(task, *args)
 
-    def _train_fold_multi(self, *args):
+    def _train_fold_multiclass(self, *args):
         task = Task("multiclass", metric="crossentropy", greater_is_better=False)
         return self._train_fold(task, *args)
 
@@ -45,7 +45,7 @@ class LightAutoMLModel(BaseModel):
     def _predict_fold_binary(self, model, X):
         return model.predict(X).data[:,0]
 
-    def _predict_fold_multi(self, model, X):
+    def _predict_fold_multiclass(self, model, X):
         return model.predict(X).data
 
     def _predict_fold_regression(self, model, X):
@@ -63,7 +63,7 @@ class LightAutoMLModel(BaseModel):
     def _get_default_hp_binary(self):
         return self._get_default_hp()
 
-    def _get_default_hp_multi(self):
+    def _get_default_hp_multiclass(self):
         return self._get_default_hp()
 
     def _get_default_hp_regression(self):

@@ -1,6 +1,6 @@
   # F1(micro): 0.437, F1(macro): 0.184, Accuracy: 0.437, Balanced Accuracy: 0.154, Balanced Accuracy Adj: 0.143
 common:
-    task: "multi" # binary, multi, regression
+    task: "multiclass" # binary, multiclass, regression
     metrics:
         - "f1;average=micro"
         - "f1;average=macro"

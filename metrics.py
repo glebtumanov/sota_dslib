@@ -33,7 +33,7 @@ REGRESSION_METRICS: Set[str] = {
 # Словарь для быстрого доступа к метрикам по типу задачи
 TASK_METRICS: Dict[str, Set[str]] = {
     'binary': BINARY_METRICS,
-    'multi': MULTI_METRICS,
+    'multiclass': MULTI_METRICS,
     'regression': REGRESSION_METRICS
 }
 

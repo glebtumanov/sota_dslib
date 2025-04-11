@@ -1,5 +1,5 @@
 common:
-    task: "regression" # binary, multi, regression
+    task: "regression" # binary, multiclass, regression
     metrics:
         - "mae"
         - "rmse"

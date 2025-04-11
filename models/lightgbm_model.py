@@ -20,7 +20,7 @@ class LightGBMModel(BaseModel):
         )
         return model
 
-    def _train_fold_multi(self, X_train, y_train, X_test, y_test):
+    def _train_fold_multiclass(self, X_train, y_train, X_test, y_test):
         model = LGBMClassifier(**self.hyperparameters)
         model.fit(
             X_train,
@@ -45,7 +45,7 @@ class LightGBMModel(BaseModel):
     def _predict_fold_binary(self, model, X):
         return model.predict_proba(X)[:, 1]
 
-    def _predict_fold_multi(self, model, X):
+    def _predict_fold_multiclass(self, model, X):
         return model.predict_proba(X)
 
     def _predict_fold_regression(self, model, X):
@@ -54,7 +54,7 @@ class LightGBMModel(BaseModel):
     def _get_required_hp_binary(self):
         return {'metric': 'auc'}
 
-    def _get_required_hp_multi(self):
+    def _get_required_hp_multiclass(self):
         return {'metric': 'multi_logloss'}
 
     def _get_required_hp_regression(self):
@@ -72,7 +72,7 @@ class LightGBMModel(BaseModel):
             'verbose': -1
         }
 
-    def _get_default_hp_multi(self):
+    def _get_default_hp_multiclass(self):
         return {
             'metric': 'multi_logloss',
             'n_estimators': 1000,

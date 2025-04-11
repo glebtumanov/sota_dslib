@@ -163,7 +163,7 @@ class SOTAModels:
         # Стратификация применяется только при разбиении на train и другие наборы данных
         print(f"Splitting data ...")
         stratify = None
-        if self.stratified_split and self.task in ['binary', 'multi']:
+        if self.stratified_split and self.task in ['binary', 'multiclass']:
             stratify = self.data[self.target_col]
 
         # Если valid_path задан, разбиваем исходный датасет только на train и test
@@ -186,7 +186,7 @@ class SOTAModels:
 
             # Затем разделяем оставшуюся часть на train и valid со стратификацией
             valid_stratify = (train_valid_df[self.target_col]
-                              if self.stratified_split and self.task in ['binary', 'multi']
+                              if self.stratified_split and self.task in ['binary', 'multiclass']
                               else None)
             self.train_df, self.valid_df = train_test_split(
                 train_valid_df,

@@ -20,7 +20,7 @@ class CatBoostModel(BaseModel):
         )
         return model
 
-    def _train_fold_multi(self, X_train, y_train, X_test, y_test):
+    def _train_fold_multiclass(self, X_train, y_train, X_test, y_test):
         model = CatBoostClassifier(**self.hyperparameters)
         model.fit(
             X_train,
@@ -45,7 +45,7 @@ class CatBoostModel(BaseModel):
     def _predict_fold_binary(self, model, X):
         return model.predict_proba(X)[:, 1]
 
-    def _predict_fold_multi(self, model, X):
+    def _predict_fold_multiclass(self, model, X):
         return model.predict_proba(X)
 
     def _predict_fold_regression(self, model, X):
@@ -54,7 +54,7 @@ class CatBoostModel(BaseModel):
     def _get_required_hp_binary(self):
         return {'eval_metric': 'AUC', 'bootstrap_type': 'Bernoulli'}
 
-    def _get_required_hp_multi(self):
+    def _get_required_hp_multiclass(self):
         return {'eval_metric': 'MultiClass', 'bootstrap_type': 'MVS'}
 
     def _get_required_hp_regression(self):
@@ -70,7 +70,7 @@ class CatBoostModel(BaseModel):
             'verbose': False,
         }
 
-    def _get_default_hp_multi(self):
+    def _get_default_hp_multiclass(self):
         return {
             'eval_metric': 'MultiClass',
             'iterations': 1000,

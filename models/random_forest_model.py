@@ -11,7 +11,7 @@ class RandomForestModel(BaseModel):
         model.fit(X_train, y_train)
         return model
 
-    def _train_fold_multi(self, X_train, y_train, X_test, y_test):
+    def _train_fold_multiclass(self, X_train, y_train, X_test, y_test):
         model = RandomForestClassifier(**self.hyperparameters)
         model.fit(X_train, y_train)
         return model
@@ -24,7 +24,7 @@ class RandomForestModel(BaseModel):
     def _predict_fold_binary(self, model, X):
         return model.predict_proba(X)[:, 1]
 
-    def _predict_fold_multi(self, model, X):
+    def _predict_fold_multiclass(self, model, X):
         return model.predict_proba(X)
 
     def _predict_fold_regression(self, model, X):
@@ -39,7 +39,7 @@ class RandomForestModel(BaseModel):
             'max_depth': 50,
         }
 
-    def _get_default_hp_multi(self):
+    def _get_default_hp_multiclass(self):
         return {
             'verbose': 0,
             'n_jobs': -1,

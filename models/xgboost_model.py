@@ -19,7 +19,7 @@ class XGBoostModel(BaseModel):
         )
         return model
 
-    def _train_fold_multi(self, X_train, y_train, X_test, y_test):
+    def _train_fold_multiclass(self, X_train, y_train, X_test, y_test):
         model = XGBClassifier(**self.hyperparameters)
         model.fit(
             X_train,
@@ -42,7 +42,7 @@ class XGBoostModel(BaseModel):
     def _predict_fold_binary(self, model, X):
         return model.predict_proba(X)[:, 1]
 
-    def _predict_fold_multi(self, model, X):
+    def _predict_fold_multiclass(self, model, X):
         return model.predict_proba(X)
 
     def _predict_fold_regression(self, model, X):
@@ -51,7 +51,7 @@ class XGBoostModel(BaseModel):
     def _get_required_hp_binary(self):
         return {'eval_metric': 'auc'}
 
-    def _get_required_hp_multi(self):
+    def _get_required_hp_multiclass(self):
         return {'eval_metric': 'mlogloss'}
 
     def _get_required_hp_regression(self):
@@ -68,7 +68,7 @@ class XGBoostModel(BaseModel):
             'verbosity': 0,
         }
 
-    def _get_default_hp_multi(self):
+    def _get_default_hp_multiclass(self):
         return {
             'eval_metric': 'mlogloss',
             'n_estimators': 1000,

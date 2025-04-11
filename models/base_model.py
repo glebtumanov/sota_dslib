@@ -12,7 +12,7 @@ class BaseModel:
         Инициализация базовой модели.
 
         Args:
-            task (str): Тип задачи ('binary', 'multi', 'regression')
+            task (str): Тип задачи ('binary', 'multiclass', 'regression')
             hp (dict): Гиперпараметры модели или None для использования значений по умолчанию
             metrics (list): Список метрик для оценки модели
             calibrate (str): Метод калибровки ('betacal', 'isotonic') или None
@@ -41,7 +41,7 @@ class BaseModel:
 
         train_methods = {
             'binary': self._train_fold_binary,
-            'multi': self._train_fold_multi,
+            'multiclass': self._train_fold_multiclass,
             'regression': self._train_fold_regression
         }
 
@@ -84,8 +84,8 @@ class BaseModel:
     def _predict(self, X, model):
         if self.task == 'binary':
             prediction = self._predict_fold_binary(model, X)
-        elif self.task == 'multi':
-            prediction = self._predict_fold_multi(model, X)
+        elif self.task == 'multiclass':
+            prediction = self._predict_fold_multiclass(model, X)
         elif self.task == 'regression':
             prediction = self._predict_fold_regression(model, X)
         else:
@@ -103,8 +103,8 @@ class BaseModel:
             predictions.append(self._predict(X, model))
 
         # Усредняем предсказания по всем моделям
-        if self.task == 'multi':
-            # Для multi усредняем вероятности по классам
+        if self.task == 'multiclass':
+            # Для multiclass усредняем вероятности по классам
             result = np.zeros_like(predictions[0])
             for pred in predictions:
                 result += pred
@@ -156,16 +156,16 @@ class BaseModel:
         if hp is None:
             if task == 'binary':
                 return self._get_default_hp_binary()
-            elif task == 'multi':
-                return self._get_default_hp_multi()
+            elif task == 'multiclass':
+                return self._get_default_hp_multiclass()
             elif task == 'regression':
                 return self._get_default_hp_regression()
         else:
             if task == 'binary':
                 hp.update(self._get_required_hp_binary())
                 return hp
-            elif task == 'multi':
-                hp.update(self._get_required_hp_multi())
+            elif task == 'multiclass':
+                hp.update(self._get_required_hp_multiclass())
                 return hp
             elif task == 'regression':
                 hp.update(self._get_required_hp_regression())
@@ -191,8 +191,8 @@ class BaseModel:
     def _train_fold_binary(self, X_train, y_train, X_test, y_test):
         raise NotImplementedError("Метод _train_fold_binary должен быть реализован в дочернем классе")
 
-    def _train_fold_multi(self, X_train, y_train, X_test, y_test):
-        raise NotImplementedError("Метод _train_fold_multi должен быть реализован в дочернем классе")
+    def _train_fold_multiclass(self, X_train, y_train, X_test, y_test):
+        raise NotImplementedError("Метод _train_fold_multiclass должен быть реализован в дочернем классе")
 
     def _train_fold_regression(self, X_train, y_train, X_test, y_test):
         raise NotImplementedError("Метод _train_fold_regression должен быть реализован в дочернем классе")
@@ -200,8 +200,8 @@ class BaseModel:
     def _predict_fold_binary(self, model, X):
         raise NotImplementedError("Метод _predict_binary_fold должен быть реализован в дочернем классе")
 
-    def _predict_fold_multi(self, model, X):
-        raise NotImplementedError("Метод _predict_multi_fold должен быть реализован в дочернем классе")
+    def _predict_fold_multiclass(self, model, X):
+        raise NotImplementedError("Метод _predict_multiclass_fold должен быть реализован в дочернем классе")
 
     def _predict_fold_regression(self, model, X):
         raise NotImplementedError("Метод _predict_regression_fold должен быть реализован в дочернем классе")
@@ -210,7 +210,7 @@ class BaseModel:
     def _get_required_hp_binary(self):
         return {}
 
-    def _get_required_hp_multi(self):
+    def _get_required_hp_multiclass(self):
         return {}
 
     def _get_required_hp_regression(self):
@@ -220,7 +220,7 @@ class BaseModel:
     def _get_default_hp_binary(self):
         return {}
 
-    def _get_default_hp_multi(self):
+    def _get_default_hp_multiclass(self):
         return {}
 
     def _get_default_hp_regression(self):

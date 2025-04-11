@@ -1,19 +1,20 @@
 common:
-    task: "multi" # binary, multi, regression
+    task: "multiclass" # binary, multiclass, regression
     metrics:
+        - "f1;average=micro"
         - "accuracy"
         - "f1;average=weighted"
         - "ap;average=macro" # average_precision_score
         - "ap;average=weighted" # average_precision_score
-    main_metric: "accuracy"
+    main_metric: "f1;average=micro"
     model_dir: "/home/gleb/models" # пути сохранения обученных моделей
     skip_cols: []
     selected_models:
+        - catboost
+        - lightgbm
+        - xgboost
+        - random_forest
         - lightautoml
-        # - random_forest
-        # - catboost
-        # - lightgbm
-        # - xgboost
 
 split_data:
     test_rate: 0.2
