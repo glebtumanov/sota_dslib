@@ -201,16 +201,13 @@ class SOTAModels:
         # Определение параметра калибровки
         calibrate = self.calibration_type if (self.use_calibration and self.task == 'binary') else None
 
-        # Получаем количество фолдов для текущей модели
-        n_folds = self.model_n_folds.get(model_type, self.n_folds)
-
         # Формируем общий словарь аргументов для всех моделей
         model_args = {
             'task': self.task,
             'hp': self.hp.get(model_type, None),
             'metrics': self.metrics_list,
             'calibrate': calibrate,
-            'n_folds': n_folds,
+            'n_folds': self.model_n_folds.get(model_type, self.n_folds),
             'main_metric': self.main_metric,
             'verbose': self.verbose,
             'features': self.selected_features,
@@ -261,7 +258,7 @@ class SOTAModels:
         # Обучение всех выбранных моделей
         for model_type in self.selected_models:
             print('-' * 10)
-            print(f"Обучение модели: {model_type} на {self.n_folds} фолдах, тип задачи: {self.task}")
+            print(f"Обучение модели: {model_type} на {self.model_n_folds[model_type]} фолдах, тип задачи: {self.task}")
 
             # Обучение модели
             model = self._train_model(model_type)

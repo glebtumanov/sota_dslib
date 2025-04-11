@@ -1,18 +1,20 @@
+  # F1(micro): 0.437, F1(macro): 0.184, Accuracy: 0.437, Balanced Accuracy: 0.154, Balanced Accuracy Adj: 0.143
 common:
     task: "multi" # binary, multi, regression
     metrics:
+        - "f1;average=micro"
+        - "f1;average=macro"
         - "accuracy"
-        - "f1;average=weighted"
-        - "ap;average=macro" # average_precision_score
-        - "ap;average=weighted" # average_precision_score
-    main_metric: "accuracy"
+        - "balanced_accuracy"
+        - "balanced_accuracy;adjusted=true"
+    main_metric: "f1;average=micro"
     model_dir: "/home/gleb/models" # пути сохранения обученных моделей
     skip_cols: []
     selected_models:
-        - lightautoml
+        - catboost
+        - lightgbm
+        # - lightautoml
         # - random_forest
-        # - catboost
-        # - lightgbm
         # - xgboost
 
 split_data:
@@ -21,7 +23,7 @@ split_data:
     stratified_split: true # стратифицированное разбиение
 
 sampling: # начальное сэмплирование данных
-    use_sampling: true   # Если поставить false, то сэмплирование делать не будем
+    use_sampling: false   # Если поставить false, то сэмплирование делать не будем
     train_sample_size: 100000 # размер тренировочной выборки
     validation_sample_size: 100000 # размер валидационной выборки
     sample_seed: 42 # seed для сэмплирования
@@ -30,17 +32,17 @@ sampling: # начальное сэмплирование данных
 
 train:
     verbose: true
-    n_folds: 3 # количество фолдов для кросс-валидации
+    n_folds: 3 # количество фолдов для кросс-валидации по умолчанию
 
 columns:
-    all_features_file: "/www/dslib/spark_sota_modeling/dataset/forest-cover-type/features.txt"
-    category_features_file: "/www/dslib/spark_sota_modeling/dataset/forest-cover-type/categorical_features.txt"
-    target_col: "cover_type" # название целевой переменной
+    all_features_file: "/www/dslib/spark_sota_modeling/dataset/okved/features.txt"
+    category_features_file: "/www/dslib/spark_sota_modeling/dataset/okved/categorical_features.txt"
+    target_col: "okved" # название целевой переменной
     index_cols: [] # название колонки с id
 
 data_source: # данные уже предобработаны и не содержат пропусков, категориальные признаки закодированы в целые числа
-    train_path: "/www/dslib/spark_sota_modeling/dataset/forest-cover-type/train.parquet"
-    valid_path: null
+    train_path: "/www/dslib/spark_sota_modeling/dataset/okved/train.parquet"
+    valid_path: "/www/dslib/spark_sota_modeling/dataset/okved/test.parquet"
 
 calibration:
     use_calibration: false # калибровка модели (только для бинарной классификации)

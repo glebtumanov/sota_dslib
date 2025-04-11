@@ -10,12 +10,12 @@ class LightAutoMLModel(BaseModel):
         super().__init__(task, hp, metrics, calibrate, n_folds, main_metric, verbose, features, cat_features, target_name)
         self.num_features = [col for col in features if col not in cat_features]
 
-    def _train_fold_binary(self, X_train, y_train, X_test=None, y_test=None):
-        task = Task("binary", metric="auc", greater_is_better=True)
+    def _train_fold(self, task, X_train, y_train, X_test, y_test):
+        X_train = pd.concat([X_train, y_train], axis=1)
+        X_test = pd.concat([X_test, y_test], axis=1)
+        X = pd.concat([X_train, X_test], axis=0)
 
-        X = pd.concat([X_train, y_train], axis=1)
-
-        automl = TabularAutoML(
+        model = TabularAutoML(
             gpu_ids=None,
             task=task,
             **self.hyperparameters
@@ -27,15 +27,20 @@ class LightAutoMLModel(BaseModel):
             "category": self.cat_features,
         }
 
-        automl.fit_predict(X, roles=roles, verbose=1)
+        model.fit_predict(X, roles=roles, verbose=0)
+        return model
 
-        return automl
+    def _train_fold_binary(self, *args):
+        task = Task("binary", metric="auc", greater_is_better=True)
+        return self._train_fold(task, *args)
 
-    def _train_fold_multi(self, X_train, y_train, X_test, y_test, params, cat_features):
-        pass
+    def _train_fold_multi(self, *args):
+        task = Task("multiclass", metric="crossentropy", greater_is_better=False)
+        return self._train_fold(task, *args)
 
-    def _train_fold_regression(self, X_train, y_train, X_test, y_test, params, cat_features):
-        pass
+    def _train_fold_regression(self, *args):
+        task = Task("reg", metric="mse", greater_is_better=False)
+        return self._train_fold(task, *args)
 
     def _predict_fold_binary(self, model, X):
         return model.predict(X).data[:,0]
@@ -44,7 +49,7 @@ class LightAutoMLModel(BaseModel):
         return model.predict(X).data
 
     def _predict_fold_regression(self, model, X):
-        return model.predict(X).data
+        return model.predict(X).data[:,0]
 
     def _get_default_hp(self):
         return {
@@ -52,7 +57,7 @@ class LightAutoMLModel(BaseModel):
             'timeout': 3600,
             'cpu_limit': 10,
             'reader_params': {'n_jobs': 4, 'cv': 2, 'memory_limit': 8},
-            'debug': True,
+            'debug': False,
         }
 
     def _get_default_hp_binary(self):

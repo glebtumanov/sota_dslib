@@ -406,10 +406,11 @@ class Metrics:
 def get_best_model_by_metric(metrics_results: Dict[str, Dict[str, float]], main_metric: str) -> Tuple[str, float]:
     """
     Определяет лучшую модель по указанной метрике с учетом направления оптимизации.
+    Поддерживает метрики с параметрами в формате "metric_name;param1=value1;param2=value2"
 
     Args:
         metrics_results: Словарь вида {модель: {метрика: значение}}
-        main_metric: Ключ метрики для сравнения
+        main_metric: Ключ метрики для сравнения (может содержать параметры)
 
     Returns:
         Tuple[str, float]: (имя лучшей модели, значение метрики)
@@ -417,8 +418,11 @@ def get_best_model_by_metric(metrics_results: Dict[str, Dict[str, float]], main_
     if not metrics_results:
         raise ValueError("metrics_results не может быть пустым")
 
+    # Парсим метрику и её параметры
+    metric_name, _ = parse_metric_string(main_metric)
+
     # Получаем направление оптимизации метрики (по умолчанию MAXIMIZE)
-    direction = METRIC_DIRECTIONS.get(main_metric, MAXIMIZE)
+    direction = METRIC_DIRECTIONS.get(metric_name, MAXIMIZE)
 
     # Находим лучшую модель
     if direction == MAXIMIZE:

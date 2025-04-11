@@ -75,8 +75,8 @@ class BaseModel:
                                  test[self.target_name])
             self.models.append(model)
 
-        print("Метрики на тестовых данных (holdout):")
-        self.evaluate(test[self.features], test[self.target_name])
+        # print("Метрики на тестовых данных (holdout):")
+        # self.evaluate(test[self.features], test[self.target_name])
 
         if self.calibrate and self.task == 'binary':
             self._calibrate(test[self.features], test[self.target_name])

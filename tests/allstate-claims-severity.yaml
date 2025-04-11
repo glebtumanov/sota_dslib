@@ -84,5 +84,5 @@ models:
             l2_leaf_reg: 3
             random_strength: 1
     lightautoml:
-        n_folds: 3
+        n_folds: 1
         use_custom_hyperparameters: false

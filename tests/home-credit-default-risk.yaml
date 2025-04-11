@@ -77,5 +77,5 @@ models:
             depth: 10
             learning_rate: 0.01
     lightautoml:
-        n_folds: 3
+        n_folds: 1
         use_custom_hyperparameters: false
