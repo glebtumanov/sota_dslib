@@ -4,37 +4,38 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
 class XGBoostModel(BaseModel):
-    def __init__(self, task='binary', hp=None, metrics=None, calibrate=None, n_folds=1, main_metric=None, verbose=True):
+    def __init__(self, task='binary', hp=None, metrics=None, calibrate=None, n_folds=1, main_metric=None,
+                 verbose=True, features=[], cat_features=[], target_name=None):
         # Вызываем инициализатор базового класса
-        super().__init__(task, hp, metrics, calibrate, n_folds, main_metric, verbose)
+        super().__init__(task, hp, metrics, calibrate, n_folds, main_metric, verbose, features, cat_features, target_name)
 
-    def _train_fold_binary(self, X_train, y_train, X_test, y_test, params, cat_features):
-        model = XGBClassifier(**params)
+    def _train_fold_binary(self, X_train, y_train, X_test, y_test):
+        model = XGBClassifier(**self.hyperparameters)
         model.fit(
             X_train,
             y_train,
             eval_set=[(X_test, y_test)],
-            verbose=params.get('verbose', False)
+            verbose=False
         )
         return model
 
-    def _train_fold_multi(self, X_train, y_train, X_test, y_test, params, cat_features):
-        model = XGBClassifier(**params)
+    def _train_fold_multi(self, X_train, y_train, X_test, y_test):
+        model = XGBClassifier(**self.hyperparameters)
         model.fit(
             X_train,
             y_train,
             eval_set=[(X_test, y_test)],
-            verbose=params.get('verbose', False)
+            verbose=False
         )
         return model
 
-    def _train_fold_regression(self, X_train, y_train, X_test, y_test, params, cat_features):
-        model = XGBRegressor(**params)
+    def _train_fold_regression(self, X_train, y_train, X_test, y_test):
+        model = XGBRegressor(**self.hyperparameters)
         model.fit(
             X_train,
             y_train,
             eval_set=[(X_test, y_test)],
-            verbose=params.get('verbose', False)
+            verbose=False
         )
         return model
 
@@ -60,16 +61,10 @@ class XGBoostModel(BaseModel):
         return {
             'eval_metric': 'auc',
             'n_estimators': 1000,
-            'early_stopping_rounds': 20,
+            'early_stopping_rounds': 100,
             'n_jobs': 4,
             'scale_pos_weight': 1,
             'random_state': 42,
-            'max_depth': 10,
-            'min_child_weight': 50,
-            'lambda': 10.0,
-            'gamma': 0.1,
-            'colsample_bytree': 0.5,
-            'subsample': 0.8,
             'verbosity': 0,
         }
 
@@ -77,15 +72,9 @@ class XGBoostModel(BaseModel):
         return {
             'eval_metric': 'mlogloss',
             'n_estimators': 1000,
-            'early_stopping_rounds': 20,
+            'early_stopping_rounds': 100,
             'n_jobs': 4,
             'random_state': 42,
-            'max_depth': 10,
-            'min_child_weight': 50,
-            'lambda': 10.0,
-            'gamma': 0.1,
-            'colsample_bytree': 0.5,
-            'subsample': 0.8,
             'verbosity': 0,
         }
 
@@ -93,14 +82,8 @@ class XGBoostModel(BaseModel):
         return {
             'eval_metric': 'rmse',
             'n_estimators': 1000,
-            'early_stopping_rounds': 20,
+            'early_stopping_rounds': 100,
             'n_jobs': 4,
             'random_state': 42,
-            'max_depth': 10,
-            'min_child_weight': 50,
-            'lambda': 10.0,
-            'gamma': 0.1,
-            'colsample_bytree': 0.5,
-            'subsample': 0.8,
             'verbosity': 0,
         }

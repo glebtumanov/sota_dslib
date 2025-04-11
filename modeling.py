@@ -41,7 +41,7 @@ class SOTAModels:
         # Параметры обучения
         train_config = self.config.get('train', {})
         self.verbose = train_config.get('verbose', False)
-        self.n_folds = train_config.get('n_folds', 3)
+        self.n_folds = train_config.get('n_folds', 1)
 
         # Информация о колонках
         columns_config = self.config.get('columns', {})
@@ -212,7 +212,10 @@ class SOTAModels:
             'calibrate': calibrate,
             'n_folds': n_folds,
             'main_metric': self.main_metric,
-            'verbose': self.verbose
+            'verbose': self.verbose,
+            'features': self.selected_features,
+            'cat_features': self.category_columns,
+            'target_name': self.target_col
         }
 
         # Динамическая загрузка модулей моделей по мере необходимости
@@ -241,9 +244,6 @@ class SOTAModels:
         self.model.train(
             train=self.train_df,
             test=self.test_df,
-            target=self.target_col,
-            features=self.selected_features,
-            cat_features=self.category_columns
         )
 
         return self.model

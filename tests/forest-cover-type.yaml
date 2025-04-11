@@ -9,10 +9,11 @@ common:
     model_dir: "/home/gleb/models" # пути сохранения обученных моделей
     skip_cols: []
     selected_models:
-        - random_forest
-        - catboost
-        - lightgbm
-        - xgboost
+        - lightautoml
+        # - random_forest
+        # - catboost
+        # - lightgbm
+        # - xgboost
 
 split_data:
     test_rate: 0.2
@@ -49,7 +50,7 @@ calibration:
 models:
     catboost:
         n_folds: 3
-        use_custom_hyperparameters: true
+        use_custom_hyperparameters: false
         hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
             eval_metric: 'AUC'
             iterations: 1000
@@ -65,7 +66,7 @@ models:
             subsample: 0.8
     lightgbm:
         n_folds: 3
-        use_custom_hyperparameters: true
+        use_custom_hyperparameters: false
         hyperparameters:
             boosting_type: 'gbdt'
             num_boost_round: 1000
@@ -89,7 +90,7 @@ models:
             silent: True
     xgboost:
         n_folds: 3
-        use_custom_hyperparameters: true
+        use_custom_hyperparameters: false
         hyperparameters:
             n_estimators: 1000
             n_jobs: 16
@@ -103,7 +104,7 @@ models:
             colsample_bylevel: 0.5
     random_forest:
         n_folds: 3
-        use_custom_hyperparameters: true
+        use_custom_hyperparameters: false
         hyperparameters:
             n_jobs: -1
             random_state: 5
@@ -112,3 +113,6 @@ models:
             max_samples: 0.5
             bootstrap: true
             verbose: 0
+    lightautoml:
+        n_folds: 3
+        use_custom_hyperparameters: false

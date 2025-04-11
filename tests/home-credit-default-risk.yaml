@@ -12,10 +12,11 @@ common:
     model_dir: "/home/gleb/models" # пути сохранения обученных моделей
     skip_cols: []
     selected_models:
-        - random_forest
-        - catboost
-        - lightgbm
-        - xgboost
+        - lightautoml
+        # - random_forest
+        # - catboost
+        # - lightgbm
+        # - xgboost
 
 split_data:
     test_rate: 0.2
@@ -75,3 +76,6 @@ models:
         hyperparameters:
             depth: 10
             learning_rate: 0.01
+    lightautoml:
+        n_folds: 3
+        use_custom_hyperparameters: false

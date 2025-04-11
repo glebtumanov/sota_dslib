@@ -4,8 +4,10 @@ import numpy as np
 from sklearn.model_selection import StratifiedKFold, KFold
 from metrics import Metrics, parse_metric_string
 
+
 class BaseModel:
-    def __init__(self, task='binary', hp=None, metrics=None, calibrate=None, n_folds=1, main_metric=None, verbose=True):
+    def __init__(self, task, hp=None, metrics=None, calibrate=None, n_folds=1, main_metric=None,
+                 verbose=True, features=[], cat_features=[], target_name=None):
         """
         Инициализация базовой модели.
 
@@ -17,9 +19,12 @@ class BaseModel:
             n_folds (int): Количество фолдов для кросс-валидации
             main_metric (str): Основная метрика для оптимизации
             verbose (bool): Выводить ли отладочную информацию
+            features (list): Список всех признаков
+            cat_features (list): Список категориальных признаков
+            target_name (str): Имя целевого признака
         """
         self.task = task
-        self.hp = hp
+        self.hyperparameters = self.get_hyperparameters(task, hp)
         self.metrics_list = metrics or []
         self.models = []  # Список моделей (для кросс-валидации)
         self.calibrate = calibrate
@@ -27,9 +32,11 @@ class BaseModel:
         self.n_folds = n_folds
         self.main_metric = main_metric
         self.verbose = verbose
+        self.features = features
+        self.cat_features = cat_features
+        self.target_name = target_name
 
-    def train(self, train, test, target, features, cat_features=[]):
-        params = self.get_hyperparameters()
+    def train(self, train, test):
         self.models = []
 
         train_methods = {
@@ -43,32 +50,36 @@ class BaseModel:
         if self.n_folds > 1:
             if self.task == 'regression':
                 kf = KFold(n_splits=self.n_folds, random_state=42, shuffle=True)
-                split_indices = kf.split(train[features])
+                split_indices = kf.split(train[self.features])
             else:
                 kf = StratifiedKFold(n_splits=self.n_folds, random_state=42, shuffle=True)
-                split_indices = kf.split(train[features], train[target])
+                split_indices = kf.split(train[self.features], train[self.target_name])
 
             for fold_idx, (train_idx, test_idx) in enumerate(split_indices):
-                X_fold_train = train[features].iloc[train_idx]
-                y_fold_train = train[target].iloc[train_idx]
-                X_fold_test = train[features].iloc[test_idx]
-                y_fold_test = train[target].iloc[test_idx]
+                X_fold_train = train[self.features].iloc[train_idx]
+                y_fold_train = train[self.target_name].iloc[train_idx]
+                X_fold_test = train[self.features].iloc[test_idx]
+                y_fold_test = train[self.target_name].iloc[test_idx]
 
-                model = train_method(X_fold_train, y_fold_train, X_fold_test, y_fold_test,
-                                     params, cat_features)
+                model = train_method(X_fold_train,
+                                     y_fold_train,
+                                     X_fold_test,
+                                     y_fold_test)
                 self.evaluate(X_fold_test, y_fold_test, model, fold_idx=fold_idx)
                 self.models.append(model)
 
         else:
-            model = train_method(train[features], train[target], test[features], test[target],
-                                 params, cat_features)
+            model = train_method(train[self.features],
+                                 train[self.target_name],
+                                 test[self.features],
+                                 test[self.target_name])
             self.models.append(model)
 
         print("Метрики на тестовых данных (holdout):")
-        self.evaluate(test[features], test[target])
+        self.evaluate(test[self.features], test[self.target_name])
 
         if self.calibrate and self.task == 'binary':
-            self._calibrate(test[features], test[target])
+            self._calibrate(test[self.features], test[self.target_name])
 
     def _predict(self, X, model):
         if self.task == 'binary':
@@ -135,30 +146,30 @@ class BaseModel:
 
         return metrics_dict
 
-    def get_hyperparameters(self):
+    def get_hyperparameters(self, task, hp=None):
         """
         Возвращает гиперпараметры модели в зависимости от типа задачи
 
         Returns:
             dict: Гиперпараметры модели
         """
-        if self.hp is None:
-            if self.task == 'binary':
+        if hp is None:
+            if task == 'binary':
                 return self._get_default_hp_binary()
-            elif self.task == 'multi':
+            elif task == 'multi':
                 return self._get_default_hp_multi()
-            elif self.task == 'regression':
+            elif task == 'regression':
                 return self._get_default_hp_regression()
         else:
-            if self.task == 'binary':
-                self.hp.update(self._get_required_hp_binary())
-                return self.hp
-            elif self.task == 'multi':
-                self.hp.update(self._get_required_hp_multi())
-                return self.hp
-            elif self.task == 'regression':
-                self.hp.update(self._get_required_hp_regression())
-                return self.hp
+            if task == 'binary':
+                hp.update(self._get_required_hp_binary())
+                return hp
+            elif task == 'multi':
+                hp.update(self._get_required_hp_multi())
+                return hp
+            elif task == 'regression':
+                hp.update(self._get_required_hp_regression())
+                return hp
 
     def get_metrics(self):
         """
@@ -167,11 +178,6 @@ class BaseModel:
         Returns:
             List[Metrics]: Список экземпляров класса Metrics
         """
-        from metrics import TASK_METRICS
-
-        # Получаем список доступных метрик для данного типа задачи
-        available_metrics = TASK_METRICS.get(self.task, set())
-
         metrics = []
         for metric_item in self.metrics_list:
             try:
@@ -182,13 +188,13 @@ class BaseModel:
         return metrics
 
     # Методы, которые должны быть реализованы в дочерних классах
-    def _train_fold_binary(self, X_train, y_train, X_test, y_test, params, cat_features):
+    def _train_fold_binary(self, X_train, y_train, X_test, y_test):
         raise NotImplementedError("Метод _train_fold_binary должен быть реализован в дочернем классе")
 
-    def _train_fold_multi(self, X_train, y_train, X_test, y_test, params, cat_features):
+    def _train_fold_multi(self, X_train, y_train, X_test, y_test):
         raise NotImplementedError("Метод _train_fold_multi должен быть реализован в дочернем классе")
 
-    def _train_fold_regression(self, X_train, y_train, X_test, y_test, params, cat_features):
+    def _train_fold_regression(self, X_train, y_train, X_test, y_test):
         raise NotImplementedError("Метод _train_fold_regression должен быть реализован в дочернем классе")
 
     def _predict_fold_binary(self, model, X):

@@ -4,40 +4,41 @@ from .base_model import BaseModel
 
 
 class CatBoostModel(BaseModel):
-    def __init__(self, task='binary', hp=None, metrics=None, calibrate=None, n_folds=1, main_metric=None, verbose=True):
+    def __init__(self, task='binary', hp=None, metrics=None, calibrate=None, n_folds=1,
+                 main_metric=None, verbose=True, features=[], cat_features=[], target_name=None):
         # Вызываем инициализатор базового класса
-        super().__init__(task, hp, metrics, calibrate, n_folds, main_metric, verbose)
+        super().__init__(task, hp, metrics, calibrate, n_folds, main_metric, verbose, features, cat_features, target_name)
 
-    def _train_fold_binary(self, X_train, y_train, X_test, y_test, params, cat_features):
-        model = CatBoostClassifier(**params)
+    def _train_fold_binary(self, X_train, y_train, X_test, y_test):
+        model = CatBoostClassifier(**self.hyperparameters)
         model.fit(
             X_train,
             y_train,
             eval_set=[(X_test, y_test)],
-            cat_features=cat_features,
-            verbose=params.get('verbose', False)
+            cat_features=self.cat_features,
+            verbose=False
         )
         return model
 
-    def _train_fold_multi(self, X_train, y_train, X_test, y_test, params, cat_features):
-        model = CatBoostClassifier(**params)
+    def _train_fold_multi(self, X_train, y_train, X_test, y_test):
+        model = CatBoostClassifier(**self.hyperparameters)
         model.fit(
             X_train,
             y_train,
             eval_set=[(X_test, y_test)],
-            cat_features=cat_features,
-            verbose=params.get('verbose', False)
+            cat_features=self.cat_features,
+            verbose=False
         )
         return model
 
-    def _train_fold_regression(self, X_train, y_train, X_test, y_test, params, cat_features):
-        model = CatBoostRegressor(**params)
+    def _train_fold_regression(self, X_train, y_train, X_test, y_test):
+        model = CatBoostRegressor(**self.hyperparameters)
         model.fit(
             X_train,
             y_train,
             eval_set=[(X_test, y_test)],
-            cat_features=cat_features,
-            verbose=params.get('verbose', False)
+            cat_features=self.cat_features,
+            verbose=False
         )
         return model
 
@@ -63,9 +64,8 @@ class CatBoostModel(BaseModel):
         return {
             'eval_metric': 'AUC',
             'iterations': 1000,
-            'early_stopping_rounds': 20,
+            'early_stopping_rounds': 100,
             'thread_count': 4,
-            'auto_class_weights': 'Balanced',
             'random_seed': 42,
             'verbose': False,
         }
@@ -74,9 +74,8 @@ class CatBoostModel(BaseModel):
         return {
             'eval_metric': 'MultiClass',
             'iterations': 1000,
-            'early_stopping_rounds': 20,
+            'early_stopping_rounds': 100,
             'thread_count': 4,
-            'auto_class_weights': 'SqrtBalanced',
             'random_seed': 42,
             'verbose': False,
         }
@@ -85,7 +84,7 @@ class CatBoostModel(BaseModel):
         return {
             'eval_metric': 'RMSE',
             'iterations': 1000,
-            'early_stopping_rounds': 20,
+            'early_stopping_rounds': 100,
             'thread_count': 4,
             'random_seed': 42,
             'verbose': False,
