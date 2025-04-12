@@ -5,7 +5,8 @@ import numpy as np
 import joblib
 from sklearn.model_selection import train_test_split
 from datetime import datetime
-from metrics import get_best_model_by_metric
+from metrics import get_best_model_by_metric, METRIC_DIRECTIONS, MAXIMIZE, MINIMIZE
+from tabulate import tabulate
 
 class SOTAModels:
     def __init__(self, config_path):
@@ -286,6 +287,9 @@ class SOTAModels:
         print(f"Лучшая модель по метрике {self.main_metric}: {best_model}")
         print(f"Значение метрики: {best_metric_value}")
 
+        # Выводим таблицу с результатами
+        self.print_metrics_table()
+
         return self.trained_models, self.metrics_results
 
     def _save_model(self, model_type, model, metric_value):
@@ -318,6 +322,50 @@ class SOTAModels:
         if self.verbose:
             print(f"Модель {model_type} сохранена в {file_path}")
 
+    def print_metrics_table(self):
+        """
+        Выводит красивую таблицу с результатами всех моделей и метрик,
+        отсортированную по главной метрике.
+        """
+        # Получаем все уникальные метрики из результатов
+        all_metrics = set()
+        for model_metrics in self.metrics_results.values():
+            all_metrics.update(model_metrics.keys())
+
+        # Сортируем метрики: сначала главная метрика, затем остальные в алфавитном порядке
+        sorted_metrics = sorted(all_metrics)
+        if self.main_metric in sorted_metrics:
+            sorted_metrics.remove(self.main_metric)
+            sorted_metrics.insert(0, self.main_metric)
+
+        # Сортируем модели по главной метрике
+        sorted_models = sorted(
+            self.metrics_results.keys(),
+            key=lambda m: self.metrics_results[m].get(self.main_metric, float('-inf')),
+            reverse=METRIC_DIRECTIONS.get(self.main_metric.split(';')[0], MAXIMIZE) == MAXIMIZE
+        )
+
+        # Формируем данные для таблицы
+        table_data = []
+        for model in sorted_models:
+            row = [model]
+            for metric in sorted_metrics:
+                value = self.metrics_results[model].get(metric, float('nan'))
+                if isinstance(value, (int, float)):
+                    row.append(f"{value:.4f}")
+                else:
+                    row.append(str(value))
+            table_data.append(row)
+
+        # Формируем заголовки
+        headers = ["Модель"] + sorted_metrics
+
+        # Выводим таблицу
+        print("\nРезультаты моделей:")
+        print(tabulate(table_data, headers=headers, tablefmt="grid", stralign="right"))
+        print()
+
 if __name__ == '__main__':
     modelling = SOTAModels('my_config.yaml')
     modelling.train_models()
+

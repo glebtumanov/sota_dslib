@@ -1,22 +1,20 @@
 common:
     task: "binary" # binary, multiclass, regression
     metrics:
-        - f1
         - roc_auc
+        - "f1@k;k=0.1"
         - "recall@k;k=0.1"
         - "precision@k;k=0.1"
-        - "ap;average=micro" # average_precision_score
-        - "ap;average=weighted" # average_precision_score
-        - "f1;average=binary"
+        - "ap"
     main_metric: roc_auc
     model_dir: "/home/gleb/models" # пути сохранения обученных моделей
     skip_cols: []
     selected_models:
         - lightautoml
-        # - random_forest
-        # - catboost
-        # - lightgbm
-        # - xgboost
+        - random_forest
+        - catboost
+        - lightgbm
+        - xgboost
 
 split_data:
     test_rate: 0.2

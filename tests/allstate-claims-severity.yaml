@@ -10,10 +10,10 @@ common:
     skip_cols: []
     selected_models:
         - lightautoml
-        # - random_forest
-        # - catboost
-        # - lightgbm
-        # - xgboost
+        - random_forest
+        - catboost
+        - lightgbm
+        - xgboost
 
 split_data:
     test_rate: 0.2
