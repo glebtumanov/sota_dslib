@@ -1,4 +1,5 @@
 common:
+    name: "my_config"
     task: "binary" # binary, multiclass, regression
     metrics:
         - f1
@@ -11,8 +12,6 @@ common:
     main_metric: roc_auc
     model_dir: "/home/gleb/models" # пути сохранения обученных моделей
     skip_cols: []
-    # k: 0.1 # топ доли наблюдений упорядоченных скоров по убыванию, на которой расчитывается метрика
-    # average: binary
     selected_models:
         - catboost
         - lightgbm

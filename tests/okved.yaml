@@ -2,12 +2,13 @@
 common:
     task: "multiclass" # binary, multiclass, regression
     metrics:
+        - "accuracy"
         - "f1;average=micro"
         - "f1;average=macro"
-        - "accuracy"
         - "balanced_accuracy"
         - "balanced_accuracy;adjusted=true"
-    main_metric: "f1;average=micro"
+        - "roc_auc;average=macro;multi_class=ovo"
+    main_metric: "accuracy"
     model_dir: "/home/gleb/models" # пути сохранения обученных моделей
     skip_cols: []
     selected_models:

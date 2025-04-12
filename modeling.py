@@ -18,8 +18,14 @@ class SOTAModels:
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
 
-        # Общие параметры
+        # Сохраняем имя модели
         common_config = self.config.get('common', {})
+        self.model_name = common_config.get('name')
+        if not self.model_name:
+            # Если имя не указано, используем имя файла конфига без расширения
+            self.model_name = os.path.splitext(os.path.basename(config_path))[0]
+
+        # Общие параметры
         self.task = common_config.get('task', 'binary')
         self.main_metric = common_config.get('main_metric', 'roc_auc')
         self.metrics_list = common_config.get('metrics', [])
@@ -253,6 +259,7 @@ class SOTAModels:
     def train_models(self):
         """
         Последовательно обучает все модели из списка selected_models
+        и сохраняет только лучшую модель по основной метрике
         """
         # Разделение данных перед обучением
         self._split_data()
@@ -279,20 +286,19 @@ class SOTAModels:
             )
 
             self.metrics_results[model_type] = metrics_result
-
-            # Сохраняем модель вместе с калибровкой (если есть)
-            metric_value = metrics_result.get(self.main_metric, 0)
-            self.save_model(model_type, model, metric_value)
-
             print()
 
-        # Вывод лучшей модели по основной метрике
-        best_model, best_metric_value = get_best_model_by_metric(self.metrics_results, self.main_metric)
-        print(f"Лучшая модель по метрике {self.main_metric}: {best_model}")
+        # Вывод таблицы с результатами
+        self.print_metrics_table()
+
+        # Определение лучшей модели по основной метрике
+        best_model_type, best_metric_value = get_best_model_by_metric(self.metrics_results, self.main_metric)
+        print(f"Лучшая модель по метрике {self.main_metric}: {best_model_type}")
         print(f"Значение метрики: {best_metric_value}")
 
-        # Выводим таблицу с результатами
-        self.print_metrics_table()
+        # Сохраняем только лучшую модель
+        best_model = self.trained_models[best_model_type]
+        self.save_model(best_model_type, best_model, best_metric_value)
 
         return self.trained_models, self.metrics_results
 
@@ -302,18 +308,21 @@ class SOTAModels:
         Каждая фолд-модель сохраняется в отдельный pickle-файл внутри архива.
         Также сохраняются дополнительные файлы с метаданными.
 
+        Архив сохраняется в поддиректории с именем модели внутри model_dir.
+
         Args:
             model_type: Тип модели (например, 'catboost')
             model: Экземпляр модели
             metric_value: Значение основной метрики
         """
-        # Создаем директорию, если не существует
-        os.makedirs(self.model_dir, exist_ok=True)
+        # Создаем директорию для модели, если не существует
+        model_subdir = os.path.join(self.model_dir, self.model_name)
+        os.makedirs(model_subdir, exist_ok=True)
 
-        # Формируем название архива в формате ГГГГММДД_МЕТРИКА_ТИП_МОДЕЛИ_ТИП_ЗАДАЧИ.zip
-        current_date = datetime.now().strftime("%Y%m%d")
-        archive_name = f"{current_date}_{metric_value:.4f}_{model_type}_{self.task}.zip"
-        archive_path = os.path.join(self.model_dir, archive_name)
+        # Формируем название архива в формате ГГГГММДД_МЕТРИКА_ТИП_ЗАДАЧИ_ТИП_МОДЕЛИ.zip
+        current_timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        archive_name = f"{metric_value:.4f}_{model_type}_{current_timestamp}.zip"
+        archive_path = os.path.join(model_subdir, archive_name)
 
         # Используем временную директорию для подготовки файлов
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -355,6 +364,7 @@ class SOTAModels:
                 f.write(f"Target column: {self.target_col}\n")
                 f.write(f"Index columns: {', '.join(self.index_cols)}\n")
                 f.write(f"Task type: {self.task}\n")
+                f.write(f"Main metric: {self.main_metric}\n")
 
             # Создаем zip-архив
             with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
@@ -366,7 +376,7 @@ class SOTAModels:
                         zipf.write(file_path, os.path.basename(file_path))
 
         if self.verbose:
-            print(f"Модель {model_type} сохранена в {archive_path}")
+            print(f"Лучшая модель {model_type} сохранена в {archive_path}")
 
     def print_metrics_table(self):
         """

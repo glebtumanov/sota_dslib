@@ -1,4 +1,5 @@
 common:
+    name: "allstate-claims-severity"
     task: "regression" # binary, multiclass, regression
     metrics:
         - "mae"

@@ -4,7 +4,7 @@ common:
         - "accuracy"
         - "f1;average=weighted"
         - "ap;average=macro"
-        - "roc_auc;average=micro;multi_class=ovo"
+        - "roc_auc;average=macro;multi_class=ovo"
     main_metric: "accuracy"
     model_dir: "/home/gleb/models" # пути сохранения обученных моделей
     skip_cols: []
