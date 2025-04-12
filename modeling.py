@@ -3,6 +3,10 @@ import yaml
 import pandas as pd
 import numpy as np
 import joblib
+import json
+import zipfile
+import tempfile
+import glob
 from sklearn.model_selection import train_test_split
 from datetime import datetime
 from metrics import get_best_model_by_metric, METRIC_DIRECTIONS, MAXIMIZE, MINIMIZE
@@ -278,7 +282,7 @@ class SOTAModels:
 
             # Сохраняем модель вместе с калибровкой (если есть)
             metric_value = metrics_result.get(self.main_metric, 0)
-            self._save_model(model_type, model, metric_value)
+            self.save_model(model_type, model, metric_value)
 
             print()
 
@@ -292,9 +296,11 @@ class SOTAModels:
 
         return self.trained_models, self.metrics_results
 
-    def _save_model(self, model_type, model, metric_value):
+    def save_model(self, model_type, model, metric_value):
         """
-        Сохраняет обученную модель и калибровочную модель (если есть) в директорию model_dir
+        Сохраняет обученную модель и калибровочную модель (если есть) в zip-архив.
+        Каждая фолд-модель сохраняется в отдельный pickle-файл внутри архива.
+        Также сохраняются дополнительные файлы с метаданными.
 
         Args:
             model_type: Тип модели (например, 'catboost')
@@ -304,23 +310,63 @@ class SOTAModels:
         # Создаем директорию, если не существует
         os.makedirs(self.model_dir, exist_ok=True)
 
-        # Формируем название файла в формате ГГГГММДД_ЧЧММСС_МЕТРИКА_ТИП_МОДЕЛИ_ТИП_ЗАДАЧИ.pickle
-        current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_name = f"{current_time}_{metric_value:.4f}_{model_type}_{self.task}.pickle"
-        file_path = os.path.join(self.model_dir, file_name)
+        # Формируем название архива в формате ГГГГММДД_МЕТРИКА_ТИП_МОДЕЛИ_ТИП_ЗАДАЧИ.zip
+        current_date = datetime.now().strftime("%Y%m%d")
+        archive_name = f"{current_date}_{metric_value:.4f}_{model_type}_{self.task}.zip"
+        archive_path = os.path.join(self.model_dir, archive_name)
 
-        # Создаем список всех моделей для сохранения
-        models_to_save = model.models.copy()
+        # Используем временную директорию для подготовки файлов
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Сохраняем каждую фолд-модель в отдельный файл
+            for i, fold_model in enumerate(model.models):
+                fold_file = os.path.join(temp_dir, f"fold_{i}.pickle")
+                joblib.dump(fold_model, fold_file)
 
-        # Добавляем калибровочную модель, если она есть
-        if model.calibration_model is not None:
-            models_to_save.append(model.calibration_model)
+            # Сохраняем калибровочную модель, если она есть
+            if model.calibration_model is not None:
+                calibration_file = os.path.join(temp_dir, "calibration.pickle")
+                joblib.dump(model.calibration_model, calibration_file)
 
-        # Сохраняем модели с помощью joblib
-        joblib.dump(models_to_save, file_path)
+            # Сохраняем гиперпараметры в JSON-файле
+            hyperparams_file = os.path.join(temp_dir, "hyperparameters.json")
+            hyperparams = model.hyperparameters if hasattr(model, 'hyperparameters') else {}
+            with open(hyperparams_file, 'w') as f:
+                json.dump(hyperparams, f, indent=4)
+
+            # Сохраняем метрики в JSON-файле
+            metrics_file = os.path.join(temp_dir, "metrics.json")
+            metrics = self.metrics_results.get(model_type, {})
+            with open(metrics_file, 'w') as f:
+                json.dump(metrics, f, indent=4)
+
+            # Сохраняем список всех признаков
+            features_file = os.path.join(temp_dir, "features.txt")
+            with open(features_file, 'w') as f:
+                f.write('\n'.join(self.selected_features))
+
+            # Сохраняем список категориальных признаков
+            cat_features_file = os.path.join(temp_dir, "cat_features.txt")
+            with open(cat_features_file, 'w') as f:
+                f.write('\n'.join(self.category_columns))
+
+            # Сохраняем информацию о таргете и индексе
+            target_info_file = os.path.join(temp_dir, "target_index_info.txt")
+            with open(target_info_file, 'w') as f:
+                f.write(f"Target column: {self.target_col}\n")
+                f.write(f"Index columns: {', '.join(self.index_cols)}\n")
+                f.write(f"Task type: {self.task}\n")
+
+            # Создаем zip-архив
+            with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                # Добавляем все файлы из временной директории
+                for root, _, files in os.walk(temp_dir):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        # Архивируем файл с относительным путем
+                        zipf.write(file_path, os.path.basename(file_path))
 
         if self.verbose:
-            print(f"Модель {model_type} сохранена в {file_path}")
+            print(f"Модель {model_type} сохранена в {archive_path}")
 
     def print_metrics_table(self):
         """

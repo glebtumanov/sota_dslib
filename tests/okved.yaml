@@ -11,9 +11,9 @@ common:
     model_dir: "/home/gleb/models" # пути сохранения обученных моделей
     skip_cols: []
     selected_models:
+        - lightautoml
         # - catboost
         # - lightgbm
-        - lightautoml
         # - random_forest
         # - xgboost
 
