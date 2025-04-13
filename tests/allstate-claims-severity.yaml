@@ -37,7 +37,7 @@ columns:
     all_features_file: "/www/dslib/spark_sota_modeling/dataset/allstate-claims-severity/features.txt"
     category_features_file: "/www/dslib/spark_sota_modeling/dataset/allstate-claims-severity/categorical_features.txt"
     target_col: "loss" # название целевой переменной
-    index_cols: [] # название колонки с id
+    index_cols: ["id"] # название колонки с id
 
 data_source: # данные уже предобработаны и не содержат пропусков, категориальные признаки закодированы в целые числа
     train_path: "/www/dslib/spark_sota_modeling/dataset/allstate-claims-severity/train.parquet"
