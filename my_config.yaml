@@ -18,6 +18,7 @@ common:
         - xgboost
         - random_forest
         - lightautoml
+        - tabnet
 
 split_data:
     test_rate: 0.2
@@ -56,7 +57,7 @@ models:
     catboost:
         n_folds: 3
         use_custom_hyperparameters: false
-        hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
+        hyperparameters:
             depth: 10
             learning_rate: 0.01
             l2_leaf_reg: 3
@@ -65,7 +66,7 @@ models:
     lightgbm:
         n_folds: 3
         use_custom_hyperparameters: false
-        hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
+        hyperparameters:
             depth: 10
             learning_rate: 0.01
             l2_leaf_reg: 3
@@ -74,7 +75,7 @@ models:
     xgboost:
         n_folds: 3
         use_custom_hyperparameters: false
-        hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
+        hyperparameters:
             depth: 10
             learning_rate: 0.01
             l2_leaf_reg: 3
@@ -83,8 +84,34 @@ models:
     random_forest:
         n_folds: 3
         use_custom_hyperparameters: false
-        hyperparameters: # если use_custom_hyperparameters = true, то используем эти гиперпараметры
+        hyperparameters:
             depth: 10
             learning_rate: 0.01
             l2_leaf_reg: 3
             random_strength: 1
+    tabnet:
+        n_folds: 1
+        use_custom_hyperparameters: true
+        hyperparameters:
+            cat_emb_dim: 4 # размерность эмбеддингов для категориальных признаков, диапазон [1-16]
+            n_steps: 4 # количество шагов в TabNet, диапазон [3-10]
+            hidden_dim: 16 # размерность скрытого слоя, диапазон [8-128]
+            decision_dim: 8 # размерность решающего слоя, диапазон [4-64]
+            n_glu_layers: 3 # количество GLU слоев, диапазон [2-4]
+            dropout: 0.1 # вероятность дропаута, диапазон [0.1-0.9]
+            gamma: 1.5 # коэффициент затухания для масок внимания, диапазон [1.0-2.0]
+            lambda_sparse: 0.0001 # коэффициент регуляризации разреженности, диапазон [0-0.01]
+            virtual_batch_size: 128 # размер виртуального батча, диапазон [128-4096]
+            momentum: 0.9 # параметр momentum для BatchNorm, диапазон [0.6-0.98]
+            batch_size: 1024 # размер батча для обучения, диапазон [256-32768]
+            epochs: 50 # количество эпох обучения, диапазон {20, 50, 100, 200, ...}
+            learning_rate: 0.01 # скорость обучения, диапазон [0.001-0.025]
+            early_stopping_patience: 5 # количество эпох без улучшения до остановки обучения
+            weight_decay: 1e-5 # L2-регуляризация для оптимизатора
+            scale_numerical: true # масштабировать ли числовые признаки
+            scale_method: "standard" # метод масштабирования числовых признаков (standard, minmax, quantile, binning)
+            n_bins: 10 # количество бинов для binning
+            device: cuda # устройство для обучения (cuda/cpu)
+            verbose: true # выводить ли прогресс обучения
+            num_workers: 0 # количество worker-процессов для DataLoader (0 - однопроцессный режим)
+            random_state: 42 # seed для генерации случайных чисел

@@ -10,6 +10,7 @@ import pandas as pd
 from sklearn.preprocessing import LabelEncoder
 import gc
 import warnings
+import copy
 warnings.filterwarnings('ignore')
 
 # Импортируем CatEmbDataset из нового модуля
@@ -908,7 +909,7 @@ class TabNet(BaseEstimator):
                 best_metric = current_metric
                 no_improvement_epochs = 0
                 # Сохраняем лучшую модель
-                best_model_state = self.model.state_dict().copy()
+                best_model_state = copy.deepcopy(self.model.state_dict())
                 if self.verbose:
                     print(f"Сохраняем лучшую модель с метрикой {eval_metric}: {best_metric:.4f}")
             else:
@@ -929,6 +930,10 @@ class TabNet(BaseEstimator):
 
         # Загружаем лучшую модель
         if best_model_state:
+            # Убедимся, что тензоры на нужном устройстве
+            for param_tensor in best_model_state:
+                best_model_state[param_tensor] = best_model_state[param_tensor].to(self.device)
+
             self.model.load_state_dict(best_model_state)
             if self.verbose:
                 print("Загружена лучшая модель")

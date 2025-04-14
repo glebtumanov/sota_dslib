@@ -7,8 +7,9 @@ import json
 import zipfile
 import tempfile
 import glob
+import time
 from sklearn.model_selection import train_test_split
-from datetime import datetime
+from datetime import datetime, timedelta
 from metrics import get_best_model_by_metric, METRIC_DIRECTIONS, MAXIMIZE, MINIMIZE
 from tabulate import tabulate
 
@@ -242,6 +243,9 @@ class SOTAModels:
         elif model_type == 'lightautoml':
             from models.lightautoml_model import LightAutoMLModel
             model_class = LightAutoMLModel
+        elif model_type == 'tabnet':
+            from models.tabnet_model import TabNetModel
+            model_class = TabNetModel
         else:
             raise ValueError(f"Неизвестный тип модели: {model_type}")
 
@@ -272,8 +276,14 @@ class SOTAModels:
             print('-' * 10)
             print(f"Обучение модели: {model_type} на {self.model_n_folds[model_type]} фолдах, тип задачи: {self.task}")
 
+            # Замеряем время начала обучения
+            start_time = time.time()
+
             # Обучение модели
             model = self._train_model(model_type)
+
+            # Вычисляем затраченное время в секундах
+            time_spent = time.time() - start_time
 
             # Сохранение модели в словаре
             self.trained_models[model_type] = model
@@ -285,6 +295,8 @@ class SOTAModels:
                 self.valid_df[self.target_col],
             )
 
+            # Добавляем время обучения к метрикам
+            metrics_result['time_spent'] = time_spent
             self.metrics_results[model_type] = metrics_result
             print()
 
@@ -388,11 +400,18 @@ class SOTAModels:
         for model_metrics in self.metrics_results.values():
             all_metrics.update(model_metrics.keys())
 
+        # Удаляем time_spent из общего списка метрик, чтобы добавить его в конце
+        if 'time_spent' in all_metrics:
+            all_metrics.remove('time_spent')
+
         # Сортируем метрики: сначала главная метрика, затем остальные в алфавитном порядке
         sorted_metrics = sorted(all_metrics)
         if self.main_metric in sorted_metrics:
             sorted_metrics.remove(self.main_metric)
             sorted_metrics.insert(0, self.main_metric)
+
+        # Добавляем time_spent в конец списка метрик
+        sorted_metrics.append('time_spent')
 
         # Сортируем модели по главной метрике
         sorted_models = sorted(
@@ -407,14 +426,18 @@ class SOTAModels:
             row = [model]
             for metric in sorted_metrics:
                 value = self.metrics_results[model].get(metric, float('nan'))
-                if isinstance(value, (int, float)):
+                # Форматируем время в ЧЧ:ММ:СС
+                if metric == 'time_spent' and isinstance(value, (int, float)):
+                    time_delta = timedelta(seconds=int(value))
+                    row.append(str(time_delta).split('.')[0])  # Формат HH:MM:SS
+                elif isinstance(value, (int, float)):
                     row.append(f"{value:.4f}")
                 else:
                     row.append(str(value))
             table_data.append(row)
 
         # Формируем заголовки
-        headers = ["Модель"] + sorted_metrics
+        headers = ["Модель"] + [metric if metric != 'time_spent' else 'Время обучения' for metric in sorted_metrics]
 
         # Выводим таблицу
         print("\nРезультаты моделей:")

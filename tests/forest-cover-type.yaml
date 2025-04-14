@@ -9,6 +9,7 @@ common:
     model_dir: "/home/gleb/models" # пути сохранения обученных моделей
     skip_cols: []
     selected_models:
+        - tabnet
         - catboost
         - lightgbm
         - xgboost
@@ -116,3 +117,23 @@ models:
     lightautoml:
         n_folds: 1
         use_custom_hyperparameters: false
+    tabnet:
+        n_folds: 1
+        use_custom_hyperparameters: true
+        hyperparameters:
+            verbose: false
+            n_classes: 7
+            hidden_dim: 64
+            decision_dim: 32
+            n_steps: 5
+            n_glu_layers: 3
+            dropout: 0.1
+            gamma: 1.5
+            lambda_sparse: 0.0001
+            batch_size: 16384
+            virtual_batch_size: 512
+            momentum: 0.7
+            learning_rate: 0.05
+            epochs: 1000
+            cat_emb_dim: 6
+            early_stopping_patience: 20

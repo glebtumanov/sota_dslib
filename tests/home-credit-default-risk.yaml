@@ -11,6 +11,7 @@ common:
     skip_cols: []
     selected_models:
         - lightautoml
+        - tabnet
         - random_forest
         - catboost
         - lightgbm
@@ -77,3 +78,13 @@ models:
     lightautoml:
         n_folds: 1
         use_custom_hyperparameters: false
+    tabnet:
+        n_folds: 1
+        use_custom_hyperparameters: true
+        hyperparameters:
+            dropout: 0.6
+            verbose: false
+            lambda_sparse: 0.001
+            learning_rate: 0.0015
+            early_stopping_patience: 10
+            epochs: 100
