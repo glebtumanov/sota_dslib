@@ -1,4 +1,4 @@
-from models.tabnet import TabNetBinaryClassifier, TabNetMulticlassClassifier, TabNetRegressor
+from models.estimators.tabnet_estimator import TabNetBinary, TabNetMulticlass, TabNetRegressor
 from .base_model import BaseModel
 
 
@@ -9,7 +9,7 @@ class TabNetModel(BaseModel):
         super().__init__(task, hp, metrics, calibrate, n_folds, main_metric, verbose, features, cat_features, target_name)
 
     def _train_fold_binary(self, X_train, y_train, X_test, y_test):
-        model = TabNetBinaryClassifier(**self.hyperparameters)
+        model = TabNetBinary(**self.hyperparameters)
 
         # Обучаем модель
         model.fit(
@@ -30,7 +30,7 @@ class TabNetModel(BaseModel):
         hyperparameters = self.hyperparameters.copy()
         hyperparameters['n_classes'] = n_classes
 
-        model = TabNetMulticlassClassifier(**hyperparameters)
+        model = TabNetMulticlass(**hyperparameters)
 
         # Обучаем модель
         model.fit(

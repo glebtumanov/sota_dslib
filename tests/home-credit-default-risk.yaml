@@ -10,8 +10,8 @@ common:
     model_dir: "/home/gleb/models" # пути сохранения обученных моделей
     skip_cols: []
     selected_models:
-        - lightautoml
         - tabnet
+        - lightautoml
         - random_forest
         - catboost
         - lightgbm
@@ -86,5 +86,21 @@ models:
             verbose: false
             lambda_sparse: 0.001
             learning_rate: 0.0015
-            early_stopping_patience: 10
-            epochs: 100
+            early_stopping_patience: 20
+            epochs: 200
+            cat_emb_dim: 6
+            n_steps: 4
+            hidden_dim: 16
+            decision_dim: 8
+            n_glu_layers: 3
+            gamma: 1.5
+            virtual_batch_size: 128
+            momentum: 0.9
+            batch_size: 1024
+            learning_rate: 0.01
+            early_stopping_patience: 5
+            weight_decay: 1e-5
+            reducelronplateau_patience: 10
+            reducelronplateau_factor: 0.5
+            scale_method: "standard"
+            random_state: 42
