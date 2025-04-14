@@ -93,8 +93,8 @@ models:
         use_custom_hyperparameters: true
         hyperparameters:
             verbose: false
-            dropout: 0.1
-            lambda_sparse: 0.0001
-            learning_rate: 0.001
+            dropout: 0.3
+            lambda_sparse: 0.001
+            learning_rate: 0.0015
             epochs: 200
             early_stopping_patience: 20

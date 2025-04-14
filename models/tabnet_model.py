@@ -1,4 +1,4 @@
-from models.nn.tabnet import TabNetBinaryClassifier, TabNetMulticlassClassifier, TabNetRegressor
+from models.tabnet import TabNetBinaryClassifier, TabNetMulticlassClassifier, TabNetRegressor
 from .base_model import BaseModel
 
 

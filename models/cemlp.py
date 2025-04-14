@@ -13,176 +13,66 @@ import warnings
 import copy
 warnings.filterwarnings('ignore')
 
-# Импортируем CatEmbDataset из нового модуля
-from models.nn.dataset import CatEmbDataset
+# Импортируем CatEmbDataset из модуля dataset
+from models.dataset import CatEmbDataset
 
 
-def sparsemax(x, dim=-1):
-    """Реализация функции Sparsemax.
+class CatEmbMLPPytorch(nn.Module):
+    """Архитектура MLP с эмбеддингами для категориальных признаков.
 
-    Аргументы:
-        x: входной тензор
-        dim: размерность, по которой применяется sparsemax
+    Эта нейронная сеть объединяет эмбеддинги категориальных признаков с числовыми
+    и обрабатывает их через многослойный перцептрон с настраиваемой архитектурой.
 
-    Возвращает:
-        тензор с примененной функцией sparsemax
+    Параметры:
+    -----------
+    input_dim : int
+        Общее количество входных признаков (и категориальных, и числовых)
+    cat_idxs : list
+        Индексы категориальных признаков в тензоре данных
+    cat_dims : list
+        Размерности (количество уникальных значений) каждой категориальной переменной
+    cat_emb_dim : int, default=4
+        Размерность эмбеддингов для категориальных признаков
+    hidden_dims : list, default=[64, 32]
+        Список размерностей скрытых слоев MLP
+    output_dim : int, default=1
+        Размерность выходного слоя
+    activation : str, default='relu'
+        Функция активации ('relu', 'leaky_relu', 'selu', 'elu', 'gelu', 'swish')
+    dropout : float, default=0.1
+        Вероятность дропаута для регуляризации
+    batch_norm : bool, default=True
+        Использовать ли batch normalization
+    layer_norm : bool, default=False
+        Использовать ли layer normalization
+    initialization : str, default='he_normal'
+        Метод инициализации весов ('he_normal', 'he_uniform', 'xavier_normal', 'xavier_uniform')
     """
-    # Форма исходного тензора
-    original_shape = x.shape
-
-    # Перемещаем целевое измерение в конец для удобства
-    if dim != -1:
-        x = x.transpose(dim, -1)
-
-    # Сглаживаем все измерения кроме последнего
-    x_flat = x.reshape(-1, x.size(-1))
-    dim = -1  # Теперь обрабатываем только последнее измерение
-
-    # Сортируем входные данные в убывающем порядке
-    sorted_x, _ = torch.sort(x_flat, dim=dim, descending=True)
-
-    # Кумулятивная сумма
-    cumsum = torch.cumsum(sorted_x, dim=dim)
-
-    # Находим количество элементов
-    D = x_flat.size(dim)
-
-    # Создаем индексы
-    range_indices = torch.arange(1, D + 1, dtype=x.dtype, device=x.device)
-    range_indices = range_indices.unsqueeze(0).expand_as(x_flat)
-
-    # Вычисляем условие
-    condition = 1 + range_indices * sorted_x > cumsum
-
-    # Находим k (макс. индекс, удовлетворяющий условию)
-    k = torch.sum(condition.to(dtype=torch.int32), dim=dim, keepdim=True)
-
-    # Выбираем порог tau
-    tau = (cumsum.gather(dim, k - 1) - 1) / k
-
-    # Вычисляем результат
-    result = torch.clamp(x_flat - tau, min=0)
-
-    # Возвращаем к исходной форме
-    if dim != -1:
-        result = result.reshape(original_shape).transpose(dim, -1)
-    else:
-        result = result.reshape(original_shape)
-
-    return result
-
-
-class GhostBatchNorm(nn.Module):
-    """Реализация Ghost Batch Normalization для TabNet."""
-    def __init__(self, input_dim, virtual_batch_size=128, momentum=0.9):
-        super().__init__()
-        self.input_dim = input_dim
-        self.virtual_batch_size = virtual_batch_size
-        self.bn = nn.BatchNorm1d(input_dim, momentum=momentum)
-
-    def forward(self, x):
-        if self.training and x.size(0) > self.virtual_batch_size:
-            # Разбиваем батч на виртуальные подбатчи
-            chunks = x.chunk(max(1, x.size(0) // self.virtual_batch_size), 0)
-            # Применяем BatchNorm к каждому подбатчу
-            res = torch.cat([self.bn(x_) for x_ in chunks], dim=0)
-        else:
-            # В режиме оценки или для маленьких батчей используем обычную BatchNorm
-            res = self.bn(x)
-        return res
-
-
-class GLUBlock(nn.Module):
-    """Блок GLU (Gated Linear Unit) с Ghost Batch нормализацией и активацией."""
-    def __init__(self, input_dim, output_dim, virtual_batch_size=128, momentum=0.9):
-        super().__init__()
-        self.fc = nn.Linear(input_dim, output_dim * 2)
-        self.norm = GhostBatchNorm(output_dim * 2, virtual_batch_size, momentum)
-
-    def forward(self, x):
-        x = self.fc(x)
-
-        # Приводим размерность для BatchNorm1d если необходимо
-        shape = x.shape
-        if len(shape) > 2:
-            x = self.norm(x.view(-1, shape[-1])).view(shape)
-        else:
-            x = self.norm(x)
-
-        return F.glu(x, dim=-1)
-
-
-class FeatureTransformer(nn.Module):
-    """Трансформер признаков с GLU блоками."""
-    def __init__(self, input_dim, hidden_dim, n_glu_layers, dropout=0.1,
-                 virtual_batch_size=128, momentum=0.9):
-        super().__init__()
-        layers = []
-        for i in range(n_glu_layers):
-            layers.append(GLUBlock(
-                input_dim if i == 0 else hidden_dim,
-                hidden_dim,
-                virtual_batch_size=virtual_batch_size,
-                momentum=momentum
-            ))
-        self.layers = nn.ModuleList(layers)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x):
-        for layer in self.layers:
-            x = layer(x)
-            x = self.dropout(x)
-        return x
-
-
-class AttentiveTransformer(nn.Module):
-    """Модуль для вычисления маски внимания."""
-    def __init__(self, input_dim, output_dim, virtual_batch_size=128, momentum=0.9):
-        super().__init__()
-        self.fc = nn.Linear(input_dim, output_dim)
-        self.bn = GhostBatchNorm(output_dim, virtual_batch_size, momentum)
-        self.attentive = nn.Linear(output_dim, output_dim)
-
-    def forward(self, x, prior_scales=None):
-        shape = x.shape
-        if len(shape) > 2:
-            x = self.bn(self.fc(x).view(-1, shape[-1])).view(shape)
-        else:
-            x = self.bn(self.fc(x))
-
-        x = F.relu(x)
-
-        return sparsemax(self.attentive(x), dim=-1)
-
-
-class TabNetPytorch(nn.Module):
-    """Архитектура TabNet нейронной сети."""
     def __init__(self,
                  input_dim,
                  cat_idxs,
                  cat_dims,
                  cat_emb_dim=4,
-                 n_steps=5,
-                 hidden_dim=128,
-                 decision_dim=64,
-                 n_glu_layers=2,
+                 hidden_dims=[64, 32],
+                 output_dim=1,
+                 activation='relu',
                  dropout=0.1,
-                 gamma=1.5,
-                 lambda_sparse=0.0001,
-                 virtual_batch_size=128,
-                 momentum=0.9,
-                 output_dim=1):
+                 batch_norm=True,
+                 layer_norm=False,
+                 initialization='he_normal'):
         super().__init__()
 
         self.cat_idxs = cat_idxs
         self.cat_dims = cat_dims
         self.cat_emb_dim = cat_emb_dim
         self.input_dim = input_dim
-        self.n_steps = n_steps
-        self.gamma = gamma
-        self.lambda_sparse = lambda_sparse
-        self.virtual_batch_size = virtual_batch_size
-        self.momentum = momentum
+        self.hidden_dims = hidden_dims
+        self.output_dim = output_dim
+        self.activation = activation
+        self.dropout = dropout
+        self.batch_norm = batch_norm
+        self.layer_norm = layer_norm
+        self.initialization = initialization
 
         # Эмбеддинги для категориальных признаков
         self.embeddings = nn.ModuleList(
@@ -192,35 +82,71 @@ class TabNetPytorch(nn.Module):
         # Размерность признаков после эмбеддингов
         self.post_embed_dim = input_dim - len(cat_idxs) + len(cat_idxs) * cat_emb_dim
 
-        self.feature_transformers = nn.ModuleList()
-        self.attentive_transformers = nn.ModuleList()
+        # Строим MLP
+        layers = []
+        prev_dim = self.post_embed_dim
 
-        for step in range(n_steps):
-            self.feature_transformers.append(
-                FeatureTransformer(
-                    self.post_embed_dim,
-                    hidden_dim,
-                    n_glu_layers,
-                    dropout,
-                    virtual_batch_size,
-                    momentum
-                )
-            )
+        for dim in hidden_dims:
+            # Линейный слой
+            layers.append(nn.Linear(prev_dim, dim))
 
-            if step < n_steps - 1:
-                self.attentive_transformers.append(
-                    AttentiveTransformer(
-                        hidden_dim,
-                        self.post_embed_dim,
-                        virtual_batch_size,
-                        momentum
-                    )
-                )
+            # Нормализация
+            if batch_norm:
+                layers.append(nn.BatchNorm1d(dim))
+            if layer_norm:
+                layers.append(nn.LayerNorm(dim))
 
-        self.decision_layer = nn.Linear(hidden_dim, decision_dim)
-        self.final_layer = nn.Linear(decision_dim, output_dim)
+            # Активация
+            layers.append(self._get_activation())
 
-    def forward(self, x, return_masks=False):
+            # Дропаут
+            if dropout > 0:
+                layers.append(nn.Dropout(dropout))
+
+            prev_dim = dim
+
+        # Выходной слой
+        layers.append(nn.Linear(prev_dim, output_dim))
+
+        self.layers = nn.Sequential(*layers)
+
+        # Инициализация весов
+        self._initialize_weights()
+
+    def _get_activation(self):
+        """Возвращает функцию активации по названию."""
+        if self.activation == 'relu':
+            return nn.ReLU()
+        elif self.activation == 'leaky_relu':
+            return nn.LeakyReLU(0.1)
+        elif self.activation == 'selu':
+            return nn.SELU()
+        elif self.activation == 'elu':
+            return nn.ELU()
+        elif self.activation == 'gelu':
+            return nn.GELU()
+        elif self.activation == 'swish':
+            return nn.SiLU()  # Swish / SiLU
+        else:
+            raise ValueError(f"Неизвестная функция активации: {self.activation}")
+
+    def _initialize_weights(self):
+        """Инициализирует веса сети."""
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                if self.initialization == 'he_normal':
+                    nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
+                elif self.initialization == 'he_uniform':
+                    nn.init.kaiming_uniform_(m.weight, mode='fan_in', nonlinearity='relu')
+                elif self.initialization == 'xavier_normal':
+                    nn.init.xavier_normal_(m.weight)
+                elif self.initialization == 'xavier_uniform':
+                    nn.init.xavier_uniform_(m.weight)
+
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+    def forward(self, x):
         # Применяем эмбеддинги для категориальных признаков
         if len(self.cat_idxs) > 0:
             x_num = []
@@ -248,134 +174,77 @@ class TabNetPytorch(nn.Module):
             else:
                 x = torch.cat(x_num, dim=1)
 
-        # Применяем последовательные шаги TabNet
-        outputs = torch.zeros(x.size(0), self.final_layer.out_features).to(x.device)
-        prior_scales = torch.ones_like(x).to(x.device)
+        # Проходим через MLP
+        x = self.layers(x)
 
-        # Сохраняем маски для регуляризации разреженности
-        masks = []
-
-        for step in range(self.n_steps):
-            # Применяем маску к входным данным
-            masked_x = x * prior_scales
-
-            # Преобразуем через feature transformer
-            x_transformed = self.feature_transformers[step](masked_x)
-
-            # Считаем выход текущего шага
-            step_output = F.relu(self.decision_layer(x_transformed))
-            outputs += self.final_layer(step_output) / self.n_steps
-
-            # Обновляем маску для следующего шага
-            if step < self.n_steps - 1:
-                mask = self.attentive_transformers[step](x_transformed)
-                masks.append(mask)
-
-                # Обеспечиваем правильную размерность маски
-                if mask.size(1) != prior_scales.size(1):
-                    # Если размеры не совпадают, повторяем значения маски
-                    mask = mask.repeat(1, prior_scales.size(1) // mask.size(1))
-                    if mask.size(1) < prior_scales.size(1):
-                        padding = torch.zeros(mask.size(0), prior_scales.size(1) - mask.size(1), device=mask.device)
-                        mask = torch.cat([mask, padding], dim=1)
-                    elif mask.size(1) > prior_scales.size(1):
-                        mask = mask[:, :prior_scales.size(1)]
-
-                # Обновляем prior_scales согласно формуле из статьи
-                prior_scales = prior_scales * (self.gamma - mask)
-
-        if return_masks:
-            return outputs, masks
-        return outputs
-
-    def calculate_sparse_loss(self, masks):
-        """Вычисляет регуляризацию разреженности для масок."""
-        if self.lambda_sparse == 0 or not masks:
-            return 0.0
-
-        batch_size = masks[0].size(0)
-        total_loss = 0.0
-
-        for mask in masks:
-            entropy = -torch.sum(mask * torch.log(mask + 1e-10)) / (batch_size * self.n_steps)
-            total_loss += entropy
-
-        return self.lambda_sparse * total_loss
+        return x
 
 
-class TabNet(BaseEstimator):
-    """TabNet: Интерпретируемый алгоритм машинного обучения для табличных данных с механизмом внимания.
+class CatEmbMLP(BaseEstimator):
+    """MLP с эмбеддингами для категориальных признаков для табличных данных.
 
-    TabNet - это нейросетевая архитектура, предложенная Google Research в статье
-    "TabNet: Attentive Interpretable Tabular Learning" (https://arxiv.org/pdf/1908.07442v5).
-    Она использует последовательные шаги обработки с механизмом внимания, который
-    выбирает наиболее важные признаки на каждом шаге обучения.
-
-    Основные преимущества TabNet:
-    - Интерпретируемость: модель показывает, какие признаки важны для принятия решений
-    - Эффективность: достигает высокой производительности на табличных данных
-    - Гибкость: работает как с числовыми, так и с категориальными признаками
-    - Встроенный отбор признаков: модель автоматически выбирает важные признаки
+    Эта модель объединяет эмбеддинги категориальных переменных с числовыми признаками
+    и обрабатывает их через многослойный перцептрон (MLP).
 
     Параметры
     ----------
-    cat_emb_dim : int, default=6
+    cat_emb_dim : int, default=4
         Размерность эмбеддингов для категориальных признаков.
-        Рекомендуемый диапазон: [4-10]
+        Рекомендуемый диапазон: [2-10]
 
-    n_steps : int, default=4
-        Количество шагов в архитектуре TabNet (количество слоев принятия решений).
-        Рекомендуемый диапазон: [3-10]
+    hidden_dims : list, default=[64, 32]
+        Список размерностей скрытых слоев MLP.
+        Например, [64, 32] создаст два скрытых слоя с 64 и 32 нейронами соответственно.
 
-    hidden_dim : int, default=16
-        Размерность скрытого слоя.
-        Рекомендуемый диапазон: [8-128]
-
-    decision_dim : int, default=8
-        Размерность решающего слоя. Обычно меньше hidden_dim.
-        Рекомендуемый диапазон: [4-64]
-
-    n_glu_layers : int, default=3
-        Количество GLU (Gated Linear Unit) слоев.
-        Рекомендуемый диапазон: [2-4]
+    activation : str, default='relu'
+        Функция активации для скрытых слоев:
+        - 'relu': ReLU активация
+        - 'leaky_relu': Leaky ReLU с alpha=0.1
+        - 'selu': SELU активация (self-normalizing)
+        - 'elu': ELU активация
+        - 'gelu': GELU активация (используется в BERT)
+        - 'swish': Swish активация (SiLU в PyTorch)
 
     dropout : float, default=0.1
         Вероятность дропаута для регуляризации.
-        Рекомендуемый диапазон: [0.1-0.9]
+        Рекомендуемый диапазон: [0.0-0.5]
 
-    gamma : float, default=1.5
-        Коэффициент затухания для масок внимания.
-        Рекомендуемый диапазон: [1.0-2.0]
+    batch_norm : bool, default=True
+        Применять ли batch normalization после каждого скрытого слоя.
 
-    lambda_sparse : float, default=0.0001
-        Коэффициент регуляризации разреженности.
-        Рекомендуемый диапазон: [0-0.01]
+    layer_norm : bool, default=False
+        Применять ли layer normalization после каждого скрытого слоя.
+        Может использоваться вместе с batch_norm для улучшения стабильности.
 
-    virtual_batch_size : int, default=128
-        Размер виртуального батча для Ghost BatchNorm.
-        Рекомендуемый диапазон: [128-4096]
-
-    momentum : float, default=0.9
-        Параметр momentum для BatchNorm.
-        Рекомендуемый диапазон: [0.6-0.98]
+    initialization : str, default='he_normal'
+        Метод инициализации весов сети:
+        - 'he_normal': He инициализация с нормальным распределением
+        - 'he_uniform': He инициализация с равномерным распределением
+        - 'xavier_normal': Xavier/Glorot инициализация с нормальным распределением
+        - 'xavier_uniform': Xavier/Glorot инициализация с равномерным распределением
 
     batch_size : int, default=1024
         Размер батча для обучения.
-        Рекомендуемый диапазон: [256-32768]
+        Рекомендуемый диапазон: [32-4096]
 
     epochs : int, default=50
         Количество эпох обучения.
-        Рекомендуемый диапазон: [20-100]
+        Рекомендуемый диапазон: [10-200]
 
-    learning_rate : float, default=0.005
+    learning_rate : float, default=0.001
         Скорость обучения для оптимизатора Adam.
-        Рекомендуемый диапазон: [0.001-0.025]
+        Рекомендуемый диапазон: [0.0001-0.01]
 
-    early_stopping_patience : int, default=5
-        Количество эпох без улучшения до остановки обучения.
+    momentum : float, default=0.9
+        Параметр momentum для BatchNorm слоев.
+        Рекомендуемый диапазон: [0.6-0.99]
 
     weight_decay : float, default=1e-5
         Коэффициент L2-регуляризации для оптимизатора.
+        Рекомендуемый диапазон: [0-0.001]
+
+    early_stopping_patience : int, default=5
+        Количество эпох без улучшения до остановки обучения.
 
     scale_numerical : bool, default=True
         Масштабировать ли числовые признаки.
@@ -409,21 +278,19 @@ class TabNet(BaseEstimator):
 
     Примечания
     ----------
-    TabNet поддерживает как числовые, так и категориальные признаки. Категориальные
-    признаки автоматически преобразуются в эмбеддинги заданной размерности.
-
     В модуле представлены три специализированных класса:
-    - TabNetBinaryClassifier: для бинарной классификации
-    - TabNetMulticlassClassifier: для многоклассовой классификации
-    - TabNetRegressor: для задач регрессии
+    - CatEmbMLPBinaryClassifier: для бинарной классификации
+    - CatEmbMLPMulticlassClassifier: для многоклассовой классификации
+    - CatEmbMLPRegressor: для задач регрессии
 
     Примеры
     --------
-    >>> from models.nn.tabnet import TabNetBinaryClassifier
-    >>> model = TabNetBinaryClassifier(
-    ...     hidden_dim=32,
-    ...     n_steps=5,
-    ...     dropout=0.3,
+    >>> from models.nn.cemlp import CatEmbMLPBinaryClassifier
+    >>> model = CatEmbMLPBinaryClassifier(
+    ...     hidden_dims=[128, 64],
+    ...     dropout=0.2,
+    ...     batch_norm=True,
+    ...     activation='relu',
     ...     scale_numerical=True,
     ...     scale_method="standard"
     ... )
@@ -433,45 +300,40 @@ class TabNet(BaseEstimator):
     """
 
     def __init__(self,
-                 cat_emb_dim=6,  # Размерность эмбеддингов для категориальных признаков
-                 n_steps=4,  # Количество шагов в TabNet
-                 hidden_dim=16,  # Размерность скрытого слоя
-                 decision_dim=8,  # Размерность решающего слоя
-                 n_glu_layers=3,  # Количество GLU слоев
-                 dropout=0.1,  # Вероятность дропаута
-                 gamma=1.5,  # Коэффициент затухания для масок внимания
-                 lambda_sparse=0.0001,  # Коэффициент регуляризации разреженности
-                 virtual_batch_size=128,  # Размер виртуального батча для Ghost BatchNorm
-                 momentum=0.9,  # Параметр momentum для BatchNorm
-                 batch_size=1024,  # Размер батча для обучения
-                 epochs=50,  # Количество эпох обучения
-                 learning_rate=0.01,  # Скорость обучения
-                 early_stopping_patience=5,  # Количество эпох без улучшения до остановки
-                 weight_decay=1e-5,  # Весовая регуляризация для оптимизатора
-                 scale_numerical=True,  # Масштабировать ли числовые признаки
-                 scale_method="standard",  # Метод масштабирования ("standard", "minmax", "quantile", "binning")
-                 n_bins=10,  # Количество бинов для binning
-                 device=None,  # Устройство для обучения (cuda/cpu)
-                 output_dim=1,  # Размерность выходного слоя
-                 verbose=True,  # Вывод прогресса обучения
-                 num_workers=0,  # Количество worker-процессов для DataLoader (0 - однопроцессный режим)
-                 random_state=None):  # Случайное состояние для воспроизводимости
-
+                 cat_emb_dim=4,
+                 hidden_dims=[64, 32],
+                 activation='relu',
+                 dropout=0.1,
+                 batch_norm=True,
+                 layer_norm=False,
+                 initialization='he_normal',
+                 batch_size=1024,
+                 epochs=50,
+                 learning_rate=0.001,
+                 momentum=0.9,
+                 weight_decay=1e-5,
+                 early_stopping_patience=5,
+                 scale_numerical=True,
+                 scale_method="standard",
+                 n_bins=10,
+                 device=None,
+                 output_dim=1,
+                 verbose=True,
+                 num_workers=0,
+                 random_state=None):
         self.cat_emb_dim = cat_emb_dim
-        self.n_steps = n_steps
-        self.hidden_dim = hidden_dim
-        self.decision_dim = decision_dim
-        self.n_glu_layers = n_glu_layers
+        self.hidden_dims = hidden_dims
+        self.activation = activation
         self.dropout = dropout
-        self.gamma = gamma
-        self.lambda_sparse = lambda_sparse
-        self.virtual_batch_size = virtual_batch_size
-        self.momentum = momentum
+        self.batch_norm = batch_norm
+        self.layer_norm = layer_norm
+        self.initialization = initialization
         self.batch_size = batch_size
         self.epochs = epochs
         self.learning_rate = learning_rate
-        self.early_stopping_patience = early_stopping_patience
+        self.momentum = momentum
         self.weight_decay = weight_decay
+        self.early_stopping_patience = early_stopping_patience
         self.scale_numerical = scale_numerical
         self.scale_method = scale_method
         self.n_bins = n_bins
@@ -491,18 +353,10 @@ class TabNet(BaseEstimator):
         self.features = None
         self.cat_features = None
         self.is_fitted_ = False
-        self.scaler = None  # Будет содержать обученный скейлер
+        self.scaler = None
 
     def _prepare_data(self, X, y=None, is_train=False, is_multiclass=False):
-        """Подготовка данных для обучения/предсказания
-
-        :param X: Входные признаки (DataFrame или ndarray)
-        :param y: Целевые значения (если есть)
-        :param is_train: Флаг обучающего набора (для обучения скейлера)
-        :param is_multiclass: Флаг многоклассовой классификации
-        :return: Датасет CatEmbDataset
-        """
-
+        """Подготовка данных для обучения/предсказания"""
         if isinstance(X, pd.DataFrame):
             # Если X - это DataFrame, извлекаем признаки
             features = X.columns.tolist()
@@ -539,8 +393,8 @@ class TabNet(BaseEstimator):
                     scale_numerical=self.scale_numerical,
                     scale_method=self.scale_method,
                     n_bins=self.n_bins,
-                    scaler=None if is_train else self.scaler,  # Используем None для обучения, иначе - готовый скейлер
-                    is_multiclass=is_multiclass  # Передаем флаг multiclass
+                    scaler=None if is_train else self.scaler,
+                    is_multiclass=is_multiclass
                 )
 
                 # Если это тренировочный набор, сохраняем обученный скейлер
@@ -554,7 +408,7 @@ class TabNet(BaseEstimator):
                     scale_method=self.scale_method,
                     n_bins=self.n_bins,
                     scaler=self.scaler,
-                    is_multiclass=is_multiclass  # Передаем флаг multiclass
+                    is_multiclass=is_multiclass
                 )
 
             self.features = features
@@ -580,7 +434,7 @@ class TabNet(BaseEstimator):
                     scale_method=self.scale_method,
                     n_bins=self.n_bins,
                     scaler=None if is_train else self.scaler,
-                    is_multiclass=is_multiclass  # Передаем флаг multiclass
+                    is_multiclass=is_multiclass
                 )
 
                 # Если это тренировочный набор, сохраняем обученный скейлер
@@ -593,28 +447,25 @@ class TabNet(BaseEstimator):
                     scale_method=self.scale_method,
                     n_bins=self.n_bins,
                     scaler=self.scaler,
-                    is_multiclass=is_multiclass  # Передаем флаг multiclass
+                    is_multiclass=is_multiclass
                 )
 
         return dataset
 
     def _init_model(self, input_dim):
-        """Инициализация модели TabNet"""
-        return TabNetPytorch(
+        """Инициализация модели CatEmbMLP"""
+        return CatEmbMLPPytorch(
             input_dim=input_dim,
             cat_idxs=self.cat_idxs,
             cat_dims=self.cat_dims,
             cat_emb_dim=self.cat_emb_dim,
-            n_steps=self.n_steps,
-            hidden_dim=self.hidden_dim,
-            decision_dim=self.decision_dim,
-            n_glu_layers=self.n_glu_layers,
+            hidden_dims=self.hidden_dims,
+            output_dim=self.output_dim,
+            activation=self.activation,
             dropout=self.dropout,
-            gamma=self.gamma,
-            lambda_sparse=self.lambda_sparse,
-            virtual_batch_size=self.virtual_batch_size,
-            momentum=self.momentum,
-            output_dim=self.output_dim
+            batch_norm=self.batch_norm,
+            layer_norm=self.layer_norm,
+            initialization=self.initialization
         )
 
     def _train_epoch(self, model, loader, optimizer, criterion, scheduler=None, pbar=True):
@@ -628,22 +479,11 @@ class TabNet(BaseEstimator):
             x, y = x.to(self.device), y.to(self.device)
 
             optimizer.zero_grad()
-
-            # Получаем выходы и маски для регуляризации
-            outputs, masks = model(x, return_masks=True)
-
-            # Вычисляем основную функцию потерь
-            main_loss = criterion(outputs, y)
-
-            # Вычисляем регуляризацию разреженности
-            sparse_loss = model.calculate_sparse_loss(masks)
-
-            # Суммарная функция потерь
-            loss = main_loss + sparse_loss
-
+            outputs = model(x)
+            loss = criterion(outputs, y)
             loss.backward()
 
-            # Добавляем градиентное клиппирование для стабильности
+            # Градиентное клиппирование для стабильности
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
             optimizer.step()
@@ -670,9 +510,7 @@ class TabNet(BaseEstimator):
         with torch.no_grad():
             for x, y in tqdm(loader, desc="Validation", leave=False, disable=not (self.verbose and pbar)):
                 x, y = x.to(self.device), y.to(self.device)
-
-                # Получаем только выходы без регуляризации разреженности при валидации
-                outputs, _ = model(x, return_masks=True)
+                outputs = model(x)
                 loss = criterion(outputs, y)
 
                 total_loss += loss.item()
@@ -761,7 +599,7 @@ class TabNet(BaseEstimator):
         raise NotImplementedError("Метод должен быть переопределен в дочернем классе")
 
     def fit(self, X, y, eval_set=None, eval_metric=None, mode=None, pbar=True):
-        """Обучение модели TabNet
+        """Обучение модели CEMLP
 
         Параметры:
         -----------
@@ -851,7 +689,7 @@ class TabNet(BaseEstimator):
         criterion = self._get_criterion()
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', patience=2, factor=0.5
+            optimizer, 'min', patience=10, factor=0.5
         )
 
         # Сохраняем лучшую модель
@@ -989,11 +827,11 @@ class TabNet(BaseEstimator):
             raise ValueError("Модель не обучена. Сначала выполните метод 'fit'.")
 
 
-class TabNetBinaryClassifier(TabNet):
-    """TabNet для бинарной классификации.
+class CatEmbMLPBinaryClassifier(CatEmbMLP):
+    """MLP с эмбеддингами для задач бинарной классификации.
 
-    Реализация TabNet для задач бинарной классификации.
-    Подробности о параметрах см. в документации базового класса TabNet.
+    Реализация MLP с эмбеддингами для категориальных признаков для задач бинарной классификации.
+    Подробности о параметрах см. в документации базового класса CatEmbMLP.
 
     Дополнительные методы:
     ----------------------
@@ -1074,11 +912,11 @@ class TabNetBinaryClassifier(TabNet):
         return np.column_stack((proba_0, proba_1))
 
 
-class TabNetMulticlassClassifier(TabNet):
-    """TabNet для многоклассовой классификации.
+class CatEmbMLPMulticlassClassifier(CatEmbMLP):
+    """MLP с эмбеддингами для задач многоклассовой классификации.
 
-    Реализация TabNet для задач многоклассовой классификации.
-    Подробности о параметрах см. в документации базового класса TabNet.
+    Реализация MLP с эмбеддингами для категориальных признаков для задач многоклассовой классификации.
+    Подробности о параметрах см. в документации базового класса CatEmbMLP.
 
     Дополнительные параметры:
     -------------------------
@@ -1186,11 +1024,12 @@ class TabNetMulticlassClassifier(TabNet):
         # Применяем softmax для получения вероятностей
         return softmax(raw_predictions, axis=1)
 
-class TabNetRegressor(TabNet):
-    """TabNet для регрессии.
 
-    Реализация TabNet для задач регрессии.
-    Подробности о параметрах см. в документации базового класса TabNet.
+class CatEmbMLPRegressor(CatEmbMLP):
+    """MLP с эмбеддингами для задач регрессии.
+
+    Реализация MLP с эмбеддингами для категориальных признаков для задач регрессии.
+    Подробности о параметрах см. в документации базового класса CatEmbMLP.
     """
 
     def __init__(self, **kwargs):
