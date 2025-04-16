@@ -34,7 +34,10 @@ class CatEmbMLP(nn.Module):
     layer_norm : bool, default=False
         Использовать ли layer normalization
     initialization : str, default='he_normal'
-        Метод инициализации весов ('he_normal', 'he_uniform', 'xavier_normal', 'xavier_uniform')
+        Метод инициализации весов ('he_normal', 'he_uniform', 'xavier_normal', 'xavier_uniform',
+        'uniform', 'normal', 'constant', 'ones', 'zeros')
+    constant_value : float, default=0.001
+        Значение для constant инициализации
     leaky_relu_negative_slope : float, default=0.1
         Отрицательный наклон для leaky_relu
     feature_dropout : float, default=0.0
@@ -58,6 +61,7 @@ class CatEmbMLP(nn.Module):
                  batch_norm=True,
                  layer_norm=False,
                  initialization='he_normal',
+                 constant_value=0.001,
                  leaky_relu_negative_slope=0.1,
                  feature_dropout=0.0,
                  dynamic_emb_size=False,
@@ -75,6 +79,7 @@ class CatEmbMLP(nn.Module):
         self.batch_norm = batch_norm
         self.layer_norm = layer_norm
         self.initialization = initialization
+        self.constant_value = constant_value
         self.leaky_relu_negative_slope = leaky_relu_negative_slope
         self.feature_dropout = feature_dropout
         self.dynamic_emb_size = dynamic_emb_size
@@ -153,6 +158,18 @@ class CatEmbMLP(nn.Module):
                     nn.init.xavier_normal_(m.weight)
                 elif self.initialization == 'xavier_uniform':
                     nn.init.xavier_uniform_(m.weight)
+                elif self.initialization == 'uniform':
+                    nn.init.uniform_(m.weight)
+                elif self.initialization == 'normal':
+                    nn.init.normal_(m.weight)
+                elif self.initialization == 'constant':
+                    nn.init.constant_(m.weight, self.constant_value)
+                elif self.initialization == 'ones':
+                    nn.init.ones_(m.weight)
+                elif self.initialization == 'zeros':
+                    nn.init.zeros_(m.weight)
+                else:
+                    raise ValueError(f"Неизвестный способ инициализации: {self.initialization}")
 
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)

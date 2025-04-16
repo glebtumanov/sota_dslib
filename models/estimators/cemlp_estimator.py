@@ -134,6 +134,9 @@ class CatEmbMLPEstimator(BaseEstimator):
     max_emb_dim : int, default=16
         Максимальный размер эмбеддингов
 
+    constant_value : float, default=0.001
+        Константное значение для инициализации весов
+
     Примечания
     ----------
     В модуле представлены три специализированных класса:
@@ -166,6 +169,7 @@ class CatEmbMLPEstimator(BaseEstimator):
                  batch_norm=True,
                  layer_norm=False,
                  initialization='he_normal',
+                 constant_value=0.0,
                  leaky_relu_negative_slope=0.1,
                  dynamic_emb_size=False,
                  min_emb_dim=2,
@@ -194,6 +198,7 @@ class CatEmbMLPEstimator(BaseEstimator):
         self.batch_norm = batch_norm
         self.layer_norm = layer_norm
         self.initialization = initialization
+        self.constant_value = constant_value
         self.leaky_relu_negative_slope = leaky_relu_negative_slope
         self.dynamic_emb_size = dynamic_emb_size
         self.min_emb_dim = min_emb_dim
@@ -339,6 +344,7 @@ class CatEmbMLPEstimator(BaseEstimator):
             batch_norm=self.batch_norm,
             layer_norm=self.layer_norm,
             initialization=self.initialization,
+            constant_value=self.constant_value,
             leaky_relu_negative_slope=self.leaky_relu_negative_slope,
             dynamic_emb_size=self.dynamic_emb_size,
             min_emb_dim=self.min_emb_dim,

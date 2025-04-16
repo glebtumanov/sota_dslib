@@ -66,11 +66,12 @@ class CEMLPModel(BaseModel):
             'hidden_dims': [64, 32],
             'activation': 'relu',
             'dropout': 0.1,
-            'feature_dropout': 0.0,
+            'feature_dropout': 0.0,  # dropout для входных признаков, диапазон [0.0-0.5]
             'batch_norm': True,
             'layer_norm': False,
-            'initialization': 'he_normal',
-            'leaky_relu_negative_slope': 0.1,
+            'initialization': 'he_normal',  # he_normal, he_uniform, xavier_normal, xavier_uniform, uniform, normal, constant, ones, zeros
+            'constant_value': 0.001,  # значение для constant инициализации
+            'leaky_relu_negative_slope': 0.1,  # для LeakyReLU, диапазон [0.01-0.3]
             'dynamic_emb_size': False,
             'min_emb_dim': 2,
             'max_emb_dim': 16,
