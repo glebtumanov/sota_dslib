@@ -115,3 +115,35 @@ models:
             verbose: true # выводить ли прогресс обучения
             num_workers: 0 # количество worker-процессов для DataLoader (0 - однопроцессный режим)
             random_state: 42 # seed для генерации случайных чисел
+    cemlp:
+        n_folds: 1
+        use_custom_hyperparameters: true
+        hyperparameters:
+            cat_emb_dim: 4 # размерность эмбеддингов для категориальных признаков, диапазон [2-16]
+            hidden_dims: [64, 32] # список размерностей скрытых слоев, например [32, 16], значения 8-256
+            activation: relu # функция активации: relu, leaky_relu, selu, elu, gelu, swish, prelu
+            dropout: 0.1 # вероятность дропаута, диапазон [0.0-0.9]
+            feature_dropout: 0.0 # dropout для входных признаков (feature-wise), диапазон [0.0-0.5]
+            batch_norm: true # использовать batch normalization: true/false
+            layer_norm: false # использовать layer normalization: true/false
+            initialization: he_normal # метод инициализации весов: he_normal, he_uniform, xavier_normal, xavier_uniform
+            leaky_relu_negative_slope: 0.1 # отрицательный наклон для leaky_relu, диапазон [0.01-0.3]
+            dynamic_emb_size: false # использовать динамический размер эмбеддинга: true/false
+            min_emb_dim: 2 # min размер эмбеддинга при dynamic_emb_size, диапазон [1-16]
+            max_emb_dim: 16 # max размер эмбеддинга при dynamic_emb_size, диапазон [2-64]
+            batch_size: 1024 # размер батча, диапазон [32-4096]
+            epochs: 50 # количество эпох, диапазон [10-200]
+            learning_rate: 0.001 # скорость обучения, диапазон [0.0001-0.01]
+            momentum: 0.9 # momentum для BatchNorm, диапазон [0.6-0.99]
+            weight_decay: 1e-5 # L2-регуляризация, диапазон [0-0.001]
+            early_stopping_patience: 5 # patience для early stopping, диапазон [2-20]
+            lr_scheduler_patience: 10 # patience для ReduceLROnPlateau, диапазон [2-20]
+            lr_scheduler_factor: 0.5 # factor для ReduceLROnPlateau, диапазон [0.1-0.9]
+            scale_numerical: true # масштабировать ли числовые признаки: true/false
+            scale_method: standard # метод масштабирования: standard, minmax, quantile, binning
+            n_bins: 10 # количество бинов для binning, диапазон [2-100]
+            device: cuda # устройство для обучения: cuda, cpu
+            output_dim: 1 # размерность выхода (1 для binary/regression, n_classes для multiclass)
+            verbose: true # выводить прогресс: true/false
+            num_workers: 0 # количество worker-процессов, диапазон [0-8]
+            random_state: 42 # seed для генерации случайных чисел, любое целое число

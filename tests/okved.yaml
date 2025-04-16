@@ -13,10 +13,11 @@ common:
     skip_cols: []
     selected_models:
         - lightautoml
-        # - catboost
-        # - lightgbm
-        # - random_forest
-        # - xgboost
+        - tabnet
+        - catboost
+        - lightgbm
+        - random_forest
+        - xgboost
 
 split_data:
     test_rate: 0.2
@@ -119,3 +120,33 @@ models:
     lightautoml:
         n_folds: 1
         use_custom_hyperparameters: false
+    tabnet:
+        n_folds: 1
+        use_custom_hyperparameters: false
+        hyperparameters:
+            cat_emb_dim: 4
+            n_steps: 5
+            n_d: 64
+            n_a: 64
+            decision_dim: 32
+            n_glu_layers: 2
+            dropout: 0.1
+            gamma: 1.5
+            lambda_sparse: 0.0001
+            virtual_batch_size: 256
+            momentum: 0.9
+            batch_size: 4096
+            epochs: 100
+            learning_rate: 0.02
+            early_stopping_patience: 20
+            weight_decay: 1e-4
+            reducelronplateau_patience: 10
+            reducelronplateau_factor: 0.8
+            scale_numerical: true
+            scale_method: standard
+            n_bins: 10
+            device: null
+            output_dim: 1
+            verbose: true
+            num_workers: 0
+            random_state: 42

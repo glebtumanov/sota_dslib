@@ -130,7 +130,8 @@ class TabNet(nn.Module):
                  cat_dims,
                  cat_emb_dim=4,
                  n_steps=5,
-                 hidden_dim=128,
+                 n_d=64,  # Заменяем hidden_dim на n_d
+                 n_a=64,  # Добавляем параметр n_a
                  decision_dim=64,
                  n_glu_layers=2,
                  dropout=0.1,
@@ -150,6 +151,8 @@ class TabNet(nn.Module):
         self.lambda_sparse = lambda_sparse
         self.virtual_batch_size = virtual_batch_size
         self.momentum = momentum
+        self.n_d = n_d  # Сохраняем размерность для решающего слоя
+        self.n_a = n_a  # Сохраняем размерность для блока внимания
 
         # Эмбеддинги для категориальных признаков
         self.embeddings = nn.ModuleList(
@@ -166,7 +169,7 @@ class TabNet(nn.Module):
             self.feature_transformers.append(
                 FeatureTransformer(
                     self.post_embed_dim,
-                    hidden_dim,
+                    n_d + n_a,  # Общая размерность выхода n_d + n_a
                     n_glu_layers,
                     dropout,
                     virtual_batch_size,
@@ -177,14 +180,14 @@ class TabNet(nn.Module):
             if step < n_steps - 1:
                 self.attentive_transformers.append(
                     AttentiveTransformer(
-                        hidden_dim,
+                        n_a,  # Используем n_a для AttentiveTransformer
                         self.post_embed_dim,
                         virtual_batch_size,
                         momentum
                     )
                 )
 
-        self.decision_layer = nn.Linear(hidden_dim, decision_dim)
+        self.decision_layer = nn.Linear(n_d, decision_dim)
         self.final_layer = nn.Linear(decision_dim, output_dim)
 
     def forward(self, x, return_masks=False):
@@ -229,13 +232,17 @@ class TabNet(nn.Module):
             # Преобразуем через feature transformer
             x_transformed = self.feature_transformers[step](masked_x)
 
-            # Считаем выход текущего шага
-            step_output = F.relu(self.decision_layer(x_transformed))
+            # Разделяем выход на d[i] и a[i]
+            d_i = x_transformed[:, :self.n_d]  # Первые n_d элементов для decision
+            a_i = x_transformed[:, self.n_d:]  # Оставшиеся n_a элементов для attention
+
+            # Считаем выход текущего шага используя d_i
+            step_output = F.relu(self.decision_layer(d_i))
             outputs += self.final_layer(step_output) / self.n_steps
 
-            # Обновляем маску для следующего шага
+            # Обновляем маску для следующего шага используя a_i
             if step < self.n_steps - 1:
-                mask = self.attentive_transformers[step](x_transformed)
+                mask = self.attentive_transformers[step](a_i)
                 masks.append(mask)
 
                 # Обеспечиваем правильную размерность маски

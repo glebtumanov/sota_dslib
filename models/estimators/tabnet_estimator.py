@@ -19,6 +19,15 @@ from models.dataset import CatEmbDataset
 # Импортируем TabNet и другие компоненты из nn.tabnet
 from models.nn.tabnet import TabNet, softmax
 
+# Добавляем функцию безопасного сигмоида
+def sigmoid(x):
+    """Безопасная реализация сигмоида, избегающая переполнения."""
+    # Для положительных x используем стандартную формулу
+    # Для отрицательных делаем преобразование для стабильности
+    return np.where(x >= 0,
+                   1 / (1 + np.exp(-x)),
+                   np.exp(x) / (1 + np.exp(x)))
+
 
 class TabNetEstimator(BaseEstimator):
     """TabNet: Интерпретируемый алгоритм машинного обучения для табличных данных с механизмом внимания.
@@ -44,12 +53,16 @@ class TabNetEstimator(BaseEstimator):
         Количество шагов в архитектуре TabNet (количество слоев принятия решений).
         Рекомендуемый диапазон: [3-10]
 
-    hidden_dim : int, default=16
-        Размерность скрытого слоя.
-        Рекомендуемый диапазон: [8-128]
+    n_d : int, default=8
+        Размерность выхода decision component (Nd).
+        Рекомендуемый диапазон: [8-64]
+
+    n_a : int, default=8
+        Размерность выхода attention component (Na).
+        Рекомендуемый диапазон: [8-64]
 
     decision_dim : int, default=8
-        Размерность решающего слоя. Обычно меньше hidden_dim.
+        Размерность решающего слоя. Обычно меньше n_d.
         Рекомендуемый диапазон: [4-64]
 
     n_glu_layers : int, default=3
@@ -148,7 +161,8 @@ class TabNetEstimator(BaseEstimator):
     --------
     >>> from models.nn.tabnet import TabNetBinary
     >>> model = TabNetBinary(
-    ...     hidden_dim=32,
+    ...     n_d=32,
+    ...     n_a=32,
     ...     n_steps=5,
     ...     dropout=0.3,
     ...     scale_numerical=True,
@@ -160,23 +174,24 @@ class TabNetEstimator(BaseEstimator):
     """
 
     def __init__(self,
-                 cat_emb_dim=6,  # Размерность эмбеддингов для категориальных признаков
-                 n_steps=4,  # Количество шагов в TabNet
-                 hidden_dim=16,  # Размерность скрытого слоя
-                 decision_dim=8,  # Размерность решающего слоя
-                 n_glu_layers=3,  # Количество GLU слоев
+                 cat_emb_dim=4,  # Размерность эмбеддингов для категориальных признаков
+                 n_steps=5,  # Количество шагов в TabNet
+                 n_d=64,  # Размерность выхода decision component (Nd)
+                 n_a=64,  # Размерность выхода attention component (Na)
+                 decision_dim=32,  # Размерность решающего слоя
+                 n_glu_layers=2,  # Количество GLU слоев
                  dropout=0.1,  # Вероятность дропаута
                  gamma=1.5,  # Коэффициент затухания для масок внимания
-                 lambda_sparse=0.0001,  # Коэффициент регуляризации разреженности
-                 virtual_batch_size=128,  # Размер виртуального батча для Ghost BatchNorm
+                 lambda_sparse=0.00001,  # Коэффициент регуляризации разреженности
+                 virtual_batch_size=256,  # Размер виртуального батча для Ghost BatchNorm
                  momentum=0.9,  # Параметр momentum для BatchNorm
-                 batch_size=1024,  # Размер батча для обучения
-                 epochs=50,  # Количество эпох обучения
-                 learning_rate=0.01,  # Скорость обучения
-                 early_stopping_patience=5,  # Количество эпох без улучшения до остановки
+                 batch_size=4096,  # Размер батча для обучения
+                 epochs=100,  # Количество эпох обучения
+                 learning_rate=0.02,  # Скорость обучения
+                 early_stopping_patience=10,  # Количество эпох без улучшения до остановки
                  weight_decay=1e-5,  # Весовая регуляризация для оптимизатора
-                 reducelronplateau_patience=10,  # Количество эпох без улучшения до снижения learning rate
-                 reducelronplateau_factor=0.5,  # Коэффициент снижения learning rate
+                 reducelronplateau_patience=5,  # Количество эпох без улучшения до снижения learning rate
+                 reducelronplateau_factor=0.7,  # Коэффициент снижения learning rate [0.7-0.9]
                  scale_numerical=True,  # Масштабировать ли числовые признаки
                  scale_method="standard",  # Метод масштабирования ("standard", "minmax", "quantile", "binning")
                  n_bins=10,  # Количество бинов для binning
@@ -184,11 +199,12 @@ class TabNetEstimator(BaseEstimator):
                  output_dim=1,  # Размерность выходного слоя
                  verbose=True,  # Вывод прогресса обучения
                  num_workers=0,  # Количество worker-процессов для DataLoader (0 - однопроцессный режим)
-                 random_state=None):  # Случайное состояние для воспроизводимости
+                 random_state=42):  # Случайное состояние для воспроизводимости
 
         self.cat_emb_dim = cat_emb_dim
         self.n_steps = n_steps
-        self.hidden_dim = hidden_dim
+        self.n_d = n_d
+        self.n_a = n_a
         self.decision_dim = decision_dim
         self.n_glu_layers = n_glu_layers
         self.dropout = dropout
@@ -291,7 +307,8 @@ class TabNetEstimator(BaseEstimator):
             cat_dims=self.cat_dims,
             cat_emb_dim=self.cat_emb_dim,
             n_steps=self.n_steps,
-            hidden_dim=self.hidden_dim,
+            n_d=self.n_d,
+            n_a=self.n_a,
             decision_dim=self.decision_dim,
             n_glu_layers=self.n_glu_layers,
             dropout=self.dropout,
@@ -386,7 +403,7 @@ class TabNetEstimator(BaseEstimator):
         if metric == 'roc_auc':
             # Для бинарной классификации
             if self.output_dim == 1:
-                y_pred_proba = 1 / (1 + np.exp(-y_pred))
+                y_pred_proba = sigmoid(y_pred)
                 return roc_auc_score(y_true, y_pred_proba)
             # Для многоклассовой (не поддерживается напрямую)
             else:
@@ -663,12 +680,12 @@ class TabNetBinary(TabNetEstimator):
 
     def _evaluate_metrics(self, y_true, y_pred):
         # Преобразуем логиты в вероятности
-        y_pred_proba = 1 / (1 + np.exp(-y_pred))
+        y_pred_proba = sigmoid(y_pred)
         return roc_auc_score(y_true, y_pred_proba)
 
     def _transform_predictions(self, raw_predictions):
         # Преобразуем логиты в вероятности
-        probabilities = 1 / (1 + np.exp(-raw_predictions))
+        probabilities = sigmoid(raw_predictions)
         # Преобразуем вероятности в классы 0/1
         return (probabilities > 0.5).astype(int).squeeze()
 
@@ -707,8 +724,8 @@ class TabNetBinary(TabNetEstimator):
         del test_loader
         gc.collect()
 
-        # Преобразуем логиты в вероятности
-        proba_1 = 1 / (1 + np.exp(-raw_predictions)).squeeze()
+        # Преобразуем логиты в вероятности, используя безопасную сигмоиду
+        proba_1 = sigmoid(raw_predictions).squeeze()
         proba_0 = 1 - proba_1
 
         return np.column_stack((proba_0, proba_1))

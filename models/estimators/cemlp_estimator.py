@@ -48,6 +48,10 @@ class CatEmbMLPEstimator(BaseEstimator):
         Вероятность дропаута для регуляризации.
         Рекомендуемый диапазон: [0.0-0.5]
 
+    feature_dropout : float, default=0.0
+        Вероятность дропаута для регуляризации признаков.
+        Рекомендуемый диапазон: [0.0-0.5]
+
     batch_norm : bool, default=True
         Применять ли batch normalization после каждого скрытого слоя.
 
@@ -115,6 +119,21 @@ class CatEmbMLPEstimator(BaseEstimator):
     random_state : int, default=None
         Случайное состояние для воспроизводимости результатов.
 
+    lr_scheduler_patience : int, default=10
+        Пациентность для ReduceLROnPlateau
+
+    lr_scheduler_factor : float, default=0.5
+        Фактор для ReduceLROnPlateau
+
+    dynamic_emb_size : bool, default=False
+        Использовать ли динамическое определение размера эмбеддингов
+
+    min_emb_dim : int, default=2
+        Минимальный размер эмбеддингов
+
+    max_emb_dim : int, default=16
+        Максимальный размер эмбеддингов
+
     Примечания
     ----------
     В модуле представлены три специализированных класса:
@@ -143,9 +162,14 @@ class CatEmbMLPEstimator(BaseEstimator):
                  hidden_dims=[64, 32],
                  activation='relu',
                  dropout=0.1,
+                 feature_dropout=0.0,
                  batch_norm=True,
                  layer_norm=False,
                  initialization='he_normal',
+                 leaky_relu_negative_slope=0.1,
+                 dynamic_emb_size=False,
+                 min_emb_dim=2,
+                 max_emb_dim=16,
                  batch_size=1024,
                  epochs=50,
                  learning_rate=0.001,
@@ -159,14 +183,21 @@ class CatEmbMLPEstimator(BaseEstimator):
                  output_dim=1,
                  verbose=True,
                  num_workers=0,
-                 random_state=None):
+                 random_state=None,
+                 lr_scheduler_patience=10,
+                 lr_scheduler_factor=0.5):
         self.cat_emb_dim = cat_emb_dim
         self.hidden_dims = hidden_dims
         self.activation = activation
         self.dropout = dropout
+        self.feature_dropout = feature_dropout
         self.batch_norm = batch_norm
         self.layer_norm = layer_norm
         self.initialization = initialization
+        self.leaky_relu_negative_slope = leaky_relu_negative_slope
+        self.dynamic_emb_size = dynamic_emb_size
+        self.min_emb_dim = min_emb_dim
+        self.max_emb_dim = max_emb_dim
         self.batch_size = batch_size
         self.epochs = epochs
         self.learning_rate = learning_rate
@@ -181,6 +212,8 @@ class CatEmbMLPEstimator(BaseEstimator):
         self.verbose = verbose
         self.num_workers = num_workers
         self.random_state = random_state
+        self.lr_scheduler_patience = lr_scheduler_patience
+        self.lr_scheduler_factor = lr_scheduler_factor
 
         if random_state is not None:
             torch.manual_seed(random_state)
@@ -302,9 +335,14 @@ class CatEmbMLPEstimator(BaseEstimator):
             output_dim=self.output_dim,
             activation=self.activation,
             dropout=self.dropout,
+            feature_dropout=self.feature_dropout,
             batch_norm=self.batch_norm,
             layer_norm=self.layer_norm,
-            initialization=self.initialization
+            initialization=self.initialization,
+            leaky_relu_negative_slope=self.leaky_relu_negative_slope,
+            dynamic_emb_size=self.dynamic_emb_size,
+            min_emb_dim=self.min_emb_dim,
+            max_emb_dim=self.max_emb_dim
         )
 
     def _train_epoch(self, model, loader, optimizer, criterion, scheduler=None, pbar=True):
@@ -528,7 +566,7 @@ class CatEmbMLPEstimator(BaseEstimator):
         criterion = self._get_criterion()
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', patience=10, factor=0.5
+            optimizer, 'min', patience=self.lr_scheduler_patience, factor=self.lr_scheduler_factor
         )
 
         # Сохраняем лучшую модель
@@ -564,10 +602,9 @@ class CatEmbMLPEstimator(BaseEstimator):
 
             # Выводим информацию о прогрессе
             if self.verbose:
-                print(f"Epoch {epoch + 1}/{self.epochs}")
-                print(f"Train loss: {train_loss:.4f}, Train {eval_metric}: {train_metric:.4f}")
-                if val_loader is not None:
-                    print(f"Val loss: {val_loss:.4f}, Val {eval_metric}: {val_metric:.4f}")
+                print(f"Epoch {epoch + 1}/{self.epochs}, "
+                      f"Train loss: {train_loss:.4f}, Train {eval_metric}: {train_metric:.4f}"
+                      + (f", Val loss: {val_loss:.4f}, Val {eval_metric}: {val_metric:.4f}" if val_loader else ""))
 
             # Обновляем scheduler
             if val_loader is not None:
@@ -666,7 +703,7 @@ class CatEmbMLPEstimator(BaseEstimator):
             raise ValueError("Модель не обучена. Сначала выполните метод 'fit'.")
 
 
-class CatEmbMLPMulticlass(CatEmbMLPEstimator):
+class CatEmbMLPBinary(CatEmbMLPEstimator):
     """MLP с эмбеддингами для задач бинарной классификации.
 
     Реализация MLP с эмбеддингами для категориальных признаков для задач бинарной классификации.
@@ -678,7 +715,7 @@ class CatEmbMLPMulticlass(CatEmbMLPEstimator):
     """
 
     def __init__(self, **kwargs):
-        super().__init__(output_dim=1, **kwargs)
+        super().__init__(**kwargs)
 
     def _get_criterion(self):
         """Функция потерь для бинарной классификации"""
