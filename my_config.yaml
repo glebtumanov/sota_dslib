@@ -159,8 +159,9 @@ models:
             activation: relu # функция активации: relu, leaky_relu, selu, elu, gelu, swish, prelu
             dropout: 0.1 # вероятность дропаута, диапазон [0.0-0.9]
             feature_dropout: 0.0 # dropout для входных признаков (feature-wise), диапазон [0.0-0.5]
-            batch_norm: true # использовать batch normalization: true/false
-            layer_norm: false # использовать layer normalization: true/false
+            normalization: batch # тип нормализации: 'batch', 'layer', 'ghost_batch'
+            virtual_batch_size: 128 # размер виртуального батча для ghost_batch нормализации, диапазон [32-1024]
+            momentum: 0.9 # momentum для BatchNorm/GhostBatchNorm, диапазон [0.6-0.99]
             initialization: he_normal # метод инициализации весов: he_normal, he_uniform, xavier_normal, xavier_uniform, uniform, normal, constant, ones, zeros
             constant_value: 0.001 # значение для constant инициализации
             leaky_relu_negative_slope: 0.1 # отрицательный наклон для leaky_relu, диапазон [0.01-0.3]
@@ -170,7 +171,6 @@ models:
             batch_size: 1024 # размер батча, диапазон [32-4096]
             epochs: 50 # количество эпох, диапазон [10-200]
             learning_rate: 0.001 # скорость обучения, диапазон [0.0001-0.01]
-            momentum: 0.9 # momentum для BatchNorm, диапазон [0.6-0.99]
             weight_decay: 1e-5 # L2-регуляризация, диапазон [0-0.001]
             early_stopping_patience: 5 # patience для early stopping, диапазон [2-20]
             lr_scheduler_patience: 10 # patience для ReduceLROnPlateau, диапазон [2-20]
@@ -183,3 +183,5 @@ models:
             verbose: true # выводить прогресс: true/false
             num_workers: 0 # количество worker-процессов, диапазон [0-8]
             random_state: 42 # seed для генерации случайных чисел, любое целое число
+            use_self_attention: false # использовать self-attention: true/false
+            num_attention_heads: 4 # количество голов внимания при use_self_attention, диапазон [1-16]

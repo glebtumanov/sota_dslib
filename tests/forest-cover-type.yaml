@@ -137,3 +137,38 @@ models:
             epochs: 1000
             cat_emb_dim: 6
             early_stopping_patience: 20
+    cemlp:
+        n_folds: 1
+        use_custom_hyperparameters: true
+        hyperparameters:
+            cat_emb_dim: 4
+            hidden_dims: [64, 32]
+            activation: relu
+            dropout: 0.1
+            feature_dropout: 0.0
+            normalization: batch
+            virtual_batch_size: 128
+            momentum: 0.9
+            initialization: he_normal
+            constant_value: 0.001
+            leaky_relu_negative_slope: 0.1
+            dynamic_emb_size: false
+            min_emb_dim: 2
+            max_emb_dim: 16
+            batch_size: 1024
+            epochs: 50
+            learning_rate: 0.001
+            weight_decay: 1e-5
+            early_stopping_patience: 5
+            lr_scheduler_patience: 10
+            lr_scheduler_factor: 0.5
+            scale_numerical: true
+            scale_method: standard
+            n_bins: 10
+            device: cuda
+            output_dim: 1
+            verbose: true
+            num_workers: 0
+            random_state: 42
+            use_self_attention: false
+            num_attention_heads: 4

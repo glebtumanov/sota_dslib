@@ -7,6 +7,7 @@ class TabNetModel(BaseModel):
                  main_metric=None, verbose=True, features=[], cat_features=[], target_name=None):
         # Вызываем инициализатор базового класса
         super().__init__(task, hp, metrics, calibrate, n_folds, main_metric, verbose, features, cat_features, target_name)
+        self.cat_features = cat_features
 
     def _train_fold_binary(self, X_train, y_train, X_test, y_test):
         model = TabNetBinary(**self.hyperparameters)
@@ -17,7 +18,8 @@ class TabNetModel(BaseModel):
             y_train,
             eval_set=(X_test, y_test),
             eval_metric='roc_auc',
-            mode='max'
+            mode='max',
+            cat_features=self.cat_features
         )
 
         return model
@@ -50,19 +52,20 @@ class TabNetModel(BaseModel):
             y_train,
             eval_set=(X_test, y_test),
             eval_metric='mae',
-            mode='min'
+            mode='min',
+            cat_features=self.cat_features
         )
 
         return model
 
     def _predict_fold_binary(self, model, X):
-        return model.predict_proba(X)[:, 1]
+        return model.predict_proba(X, cat_features=self.cat_features)[:, 1]
 
     def _predict_fold_multiclass(self, model, X):
-        return model.predict_proba(X)
+        return model.predict_proba(X, cat_features=self.cat_features)
 
     def _predict_fold_regression(self, model, X):
-        return model.predict(X)
+        return model.predict(X, cat_features=self.cat_features)
 
     def _get_required_hp_binary(self):
         # Возвращаем обязательные гиперпараметры для бинарной классификации

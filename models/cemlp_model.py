@@ -5,6 +5,7 @@ class CEMLPModel(BaseModel):
     def __init__(self, task='binary', hp=None, metrics=None, calibrate=None, n_folds=1,
                  main_metric=None, verbose=True, features=[], cat_features=[], target_name=None):
         super().__init__(task, hp, metrics, calibrate, n_folds, main_metric, verbose, features, cat_features, target_name)
+        self.cat_features = cat_features
 
     def _train_fold_binary(self, X_train, y_train, X_test, y_test):
         model = CatEmbMLPBinary(**self.hyperparameters)
@@ -13,7 +14,8 @@ class CEMLPModel(BaseModel):
             y_train,
             eval_set=(X_test, y_test),
             eval_metric='roc_auc',
-            mode='max'
+            mode='max',
+            cat_features=self.cat_features
         )
         return model
 
@@ -27,7 +29,8 @@ class CEMLPModel(BaseModel):
             y_train,
             eval_set=(X_test, y_test),
             eval_metric='accuracy',
-            mode='max'
+            mode='max',
+            cat_features=self.cat_features
         )
         return model
 
@@ -38,18 +41,19 @@ class CEMLPModel(BaseModel):
             y_train,
             eval_set=(X_test, y_test),
             eval_metric='mse',
-            mode='min'
+            mode='min',
+            cat_features=self.cat_features
         )
         return model
 
     def _predict_fold_binary(self, model, X):
-        return model.predict_proba(X)[:, 1]
+        return model.predict_proba(X, cat_features=self.cat_features)[:, 1]
 
     def _predict_fold_multiclass(self, model, X):
-        return model.predict_proba(X)
+        return model.predict_proba(X, cat_features=self.cat_features)
 
     def _predict_fold_regression(self, model, X):
-        return model.predict(X)
+        return model.predict(X, cat_features=self.cat_features)
 
     def _get_required_hp_binary(self):
         return {}
@@ -67,8 +71,9 @@ class CEMLPModel(BaseModel):
             'activation': 'relu',
             'dropout': 0.1,
             'feature_dropout': 0.0,  # dropout для входных признаков, диапазон [0.0-0.5]
-            'batch_norm': True,
-            'layer_norm': False,
+            'normalization': 'batch',  # тип нормализации: 'batch', 'layer', 'ghost_batch'
+            'virtual_batch_size': 128,  # размер виртуального батча для GhostBatchNorm
+            'momentum': 0.9,  # параметр momentum для BatchNorm/GhostBatchNorm
             'initialization': 'he_normal',  # he_normal, he_uniform, xavier_normal, xavier_uniform, uniform, normal, constant, ones, zeros
             'constant_value': 0.001,  # значение для constant инициализации
             'leaky_relu_negative_slope': 0.1,  # для LeakyReLU, диапазон [0.01-0.3]
@@ -78,7 +83,6 @@ class CEMLPModel(BaseModel):
             'batch_size': 1024,
             'epochs': 50,
             'learning_rate': 0.001,
-            'momentum': 0.9,
             'weight_decay': 1e-5,
             'early_stopping_patience': 5,
             'scale_numerical': True,
@@ -91,6 +95,8 @@ class CEMLPModel(BaseModel):
             'random_state': 42,
             'lr_scheduler_patience': 10,
             'lr_scheduler_factor': 0.5,
+            'use_self_attention': False,  # использовать ли self-attention механизм
+            'num_attention_heads': 4,  # количество голов в self-attention
         }
 
     def _get_default_hp_binary(self):

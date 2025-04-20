@@ -160,6 +160,7 @@ class TabNetEstimator(BaseEstimator):
     Примеры
     --------
     >>> from models.nn.tabnet import TabNetBinary
+    >>> # Пример с автоматическим определением категориальных признаков
     >>> model = TabNetBinary(
     ...     n_d=32,
     ...     n_a=32,
@@ -171,6 +172,17 @@ class TabNetEstimator(BaseEstimator):
     >>> model.fit(X_train, y_train, eval_set=(X_val, y_val), eval_metric='roc_auc')
     >>> y_pred = model.predict(X_test)
     >>> y_proba = model.predict_proba(X_test)
+    >>>
+    >>> # Пример с явным указанием категориальных признаков
+    >>> cat_features = ['cat_feature1', 'cat_feature2', 'cat_feature3']
+    >>> model = TabNetBinary(
+    ...     n_d=32,
+    ...     n_a=32,
+    ...     n_steps=5
+    ... )
+    >>> model.fit(X_train, y_train, eval_set=(X_val, y_val), cat_features=cat_features)
+    >>> y_pred = model.predict(X_test, cat_features=cat_features)
+    >>> y_proba = model.predict_proba(X_test, cat_features=cat_features)
     """
 
     def __init__(self,
@@ -240,15 +252,20 @@ class TabNetEstimator(BaseEstimator):
         self.is_fitted_ = False
         self.scaler = None  # Будет содержать обученный скейлер
 
-    def _prepare_data(self, X, y=None, is_train=False, is_multiclass=False):
+    def _prepare_data(self, X, y=None, is_train=False, is_multiclass=False, cat_features=None):
         # Извлекаем признаки
         features = X.columns.tolist()
 
         # Определяем категориальные признаки
-        cat_features = []
-        for col in features:
-            if X[col].dtype == 'object' or X[col].dtype.name == 'category':
-                cat_features.append(col)
+        if cat_features is not None:
+            # Используем указанные категориальные признаки
+            cat_features = [f for f in cat_features if f in features]
+        else:
+            # Автоматически определяем категориальные признаки по типу данных
+            cat_features = []
+            for col in features:
+                if X[col].dtype == 'object' or X[col].dtype.name == 'category':
+                    cat_features.append(col)
 
         # Индексы категориальных признаков
         cat_idxs = [features.index(f) for f in cat_features]
@@ -457,7 +474,7 @@ class TabNetEstimator(BaseEstimator):
         if not self.is_fitted_:
             raise ValueError("Модель не обучена. Сначала выполните метод 'fit'.")
 
-    def fit(self, X, y, eval_set=None, eval_metric=None, mode=None, pbar=True):
+    def fit(self, X, y, eval_set=None, eval_metric=None, mode=None, cat_features=None, pbar=True):
         """Обучение модели TabNet
 
         Параметры:
@@ -482,6 +499,9 @@ class TabNetEstimator(BaseEstimator):
             - 'max': чем больше, тем лучше (для accuracy, auc, r2)
             - 'min': чем меньше, тем лучше (для loss, mse, rmse)
             Если None, определяется на основе метрики
+        cat_features : list, optional (default=None)
+            Список имен категориальных признаков. Если указан, используются эти признаки.
+            Если None, категориальные признаки определяются автоматически по типу данных.
         pbar : bool, optional (default=True)
             Отображать ли прогресс-бар при verbose=True
 
@@ -498,12 +518,12 @@ class TabNetEstimator(BaseEstimator):
             raise ValueError("Параметр mode должен быть 'max' или 'min'")
 
         # Подготавливаем данные
-        train_dataset = self._prepare_data(X, y, is_train=True)
+        train_dataset = self._prepare_data(X, y, is_train=True, cat_features=cat_features)
 
         val_dataset = None
         if eval_set is not None:
             X_val, y_val = eval_set
-            val_dataset = self._prepare_data(X_val, y_val, is_train=False)
+            val_dataset = self._prepare_data(X_val, y_val, is_train=False, cat_features=cat_features)
 
         # Создаем DataLoader для обучения
         train_loader = DataLoader(
@@ -617,13 +637,17 @@ class TabNetEstimator(BaseEstimator):
         self.is_fitted_ = True
         return self
 
-    def predict(self, X, pbar=True):
+    def predict(self, X, cat_features=None, pbar=True):
         """Предсказание целевых значений
 
         Параметры:
         -----------
         X : pandas.DataFrame
             Входные признаки размерности (n_samples, n_features)
+        cat_features : list, optional (default=None)
+            Список имен категориальных признаков. Если указан, используются эти признаки.
+            Если None, используются категориальные признаки, определенные при обучении.
+            Если ни один вариант не доступен, признаки определяются автоматически.
         pbar : bool, optional (default=True)
             Отображать ли прогресс-бар при verbose=True
 
@@ -634,8 +658,12 @@ class TabNetEstimator(BaseEstimator):
         """
         self._check_is_fitted()
 
+        # Если cat_features не указан, используем сохраненный при обучении
+        if cat_features is None and hasattr(self, 'cat_features'):
+            cat_features = self.cat_features
+
         # Подготавливаем данные и создаем DataLoader
-        test_dataset = self._prepare_data(X, is_train=False)
+        test_dataset = self._prepare_data(X, is_train=False, cat_features=cat_features)
         test_loader = DataLoader(
             test_dataset,
             batch_size=self.batch_size,
@@ -689,13 +717,17 @@ class TabNetBinary(TabNetEstimator):
         # Преобразуем вероятности в классы 0/1
         return (probabilities > 0.5).astype(int).squeeze()
 
-    def predict_proba(self, X, pbar=True):
+    def predict_proba(self, X, cat_features=None, pbar=True):
         """Предсказание вероятностей классов
 
         Параметры:
         -----------
         X : pandas.DataFrame
             Входные признаки размерности (n_samples, n_features)
+        cat_features : list, optional (default=None)
+            Список имен категориальных признаков. Если указан, используются эти признаки.
+            Если None, используются категориальные признаки, определенные при обучении.
+            Если ни один вариант не доступен, признаки определяются автоматически.
         pbar : bool, optional (default=True)
             Отображать ли прогресс-бар при verbose=True
 
@@ -706,8 +738,12 @@ class TabNetBinary(TabNetEstimator):
         """
         self._check_is_fitted()
 
+        # Если cat_features не указан, используем сохраненный при обучении
+        if cat_features is None and hasattr(self, 'cat_features'):
+            cat_features = self.cat_features
+
         # Подготавливаем данные и создаем DataLoader
-        test_dataset = self._prepare_data(X, is_train=False)
+        test_dataset = self._prepare_data(X, is_train=False, cat_features=cat_features)
         test_loader = DataLoader(
             test_dataset,
             batch_size=self.batch_size,
@@ -754,8 +790,8 @@ class TabNetMulticlass(TabNetEstimator):
         super().__init__(output_dim=n_classes, **kwargs)
         self.label_encoder = LabelEncoder()
 
-    def _prepare_data(self, X, y=None, is_train=False):
-        return super()._prepare_data(X, y, is_train, is_multiclass=True)
+    def _prepare_data(self, X, y=None, is_train=False, cat_features=None):
+        return super()._prepare_data(X, y, is_train, is_multiclass=True, cat_features=cat_features)
 
     def _get_criterion(self):
         return torch.nn.CrossEntropyLoss()
@@ -783,7 +819,7 @@ class TabNetMulticlass(TabNetEstimator):
 
         return predicted_classes
 
-    def fit(self, X, y, eval_set=None, eval_metric=None, mode=None, pbar=True):
+    def fit(self, X, y, eval_set=None, eval_metric=None, mode=None, cat_features=None, pbar=True):
         """Обучение модели с предварительной кодировкой меток классов"""
         # Кодируем метки классов
         encoded_y = self.label_encoder.fit_transform(y)
@@ -795,15 +831,19 @@ class TabNetMulticlass(TabNetEstimator):
             eval_set = (X_val, encoded_y_val)
 
         # Обучаем модель с закодированными метками
-        return super().fit(X, encoded_y, eval_set=eval_set, eval_metric=eval_metric, mode=mode, pbar=pbar)
+        return super().fit(X, encoded_y, eval_set=eval_set, eval_metric=eval_metric, mode=mode, cat_features=cat_features, pbar=pbar)
 
-    def predict_proba(self, X, pbar=True):
+    def predict_proba(self, X, cat_features=None, pbar=True):
         """Предсказание вероятностей классов
 
         Параметры:
         -----------
         X : pandas.DataFrame
             Входные признаки размерности (n_samples, n_features)
+        cat_features : list, optional (default=None)
+            Список имен категориальных признаков. Если указан, используются эти признаки.
+            Если None, используются категориальные признаки, определенные при обучении.
+            Если ни один вариант не доступен, признаки определяются автоматически.
         pbar : bool, optional (default=True)
             Отображать ли прогресс-бар при verbose=True
 
@@ -814,8 +854,12 @@ class TabNetMulticlass(TabNetEstimator):
         """
         self._check_is_fitted()
 
+        # Если cat_features не указан, используем сохраненный при обучении
+        if cat_features is None and hasattr(self, 'cat_features'):
+            cat_features = self.cat_features
+
         # Подготавливаем данные и создаем DataLoader
-        test_dataset = self._prepare_data(X, is_train=False)
+        test_dataset = self._prepare_data(X, is_train=False, cat_features=cat_features)
         test_loader = DataLoader(
             test_dataset,
             batch_size=self.batch_size,

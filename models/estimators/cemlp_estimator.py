@@ -52,12 +52,19 @@ class CatEmbMLPEstimator(BaseEstimator):
         Вероятность дропаута для регуляризации признаков.
         Рекомендуемый диапазон: [0.0-0.5]
 
-    batch_norm : bool, default=True
-        Применять ли batch normalization после каждого скрытого слоя.
+    normalization : str, default='batch'
+        Метод нормализации:
+        - 'batch': Batch Normalization
+        - 'layer': Layer Normalization
+        - 'none': Без нормализации
 
-    layer_norm : bool, default=False
-        Применять ли layer normalization после каждого скрытого слоя.
-        Может использоваться вместе с batch_norm для улучшения стабильности.
+    virtual_batch_size : int, default=128
+        Размер виртуального батча для Batch Normalization.
+        Используется только если normalization='batch'.
+
+    momentum : float, default=0.9
+        Параметр momentum для BatchNorm слоев.
+        Рекомендуемый диапазон: [0.6-0.99]
 
     initialization : str, default='he_normal'
         Метод инициализации весов сети:
@@ -77,10 +84,6 @@ class CatEmbMLPEstimator(BaseEstimator):
     learning_rate : float, default=0.001
         Скорость обучения для оптимизатора Adam.
         Рекомендуемый диапазон: [0.0001-0.01]
-
-    momentum : float, default=0.9
-        Параметр momentum для BatchNorm слоев.
-        Рекомендуемый диапазон: [0.6-0.99]
 
     weight_decay : float, default=1e-5
         Коэффициент L2-регуляризации для оптимизатора.
@@ -137,6 +140,12 @@ class CatEmbMLPEstimator(BaseEstimator):
     constant_value : float, default=0.001
         Константное значение для инициализации весов
 
+    use_self_attention : bool, default=False
+        Использовать ли self-attention в модели
+
+    num_attention_heads : int, default=4
+        Количество attention heads в модели
+
     Примечания
     ----------
     В модуле представлены три специализированных класса:
@@ -166,10 +175,11 @@ class CatEmbMLPEstimator(BaseEstimator):
                  activation='relu',
                  dropout=0.1,
                  feature_dropout=0.0,
-                 batch_norm=True,
-                 layer_norm=False,
+                 normalization='batch',
+                 virtual_batch_size=128,
+                 momentum=0.9,
                  initialization='he_normal',
-                 constant_value=0.0,
+                 constant_value=0.001,
                  leaky_relu_negative_slope=0.1,
                  dynamic_emb_size=False,
                  min_emb_dim=2,
@@ -177,7 +187,6 @@ class CatEmbMLPEstimator(BaseEstimator):
                  batch_size=1024,
                  epochs=50,
                  learning_rate=0.001,
-                 momentum=0.9,
                  weight_decay=1e-5,
                  early_stopping_patience=5,
                  scale_numerical=True,
@@ -189,14 +198,17 @@ class CatEmbMLPEstimator(BaseEstimator):
                  num_workers=0,
                  random_state=None,
                  lr_scheduler_patience=10,
-                 lr_scheduler_factor=0.5):
+                 lr_scheduler_factor=0.5,
+                 use_self_attention=False,
+                 num_attention_heads=4):
         self.cat_emb_dim = cat_emb_dim
         self.hidden_dims = hidden_dims
         self.activation = activation
         self.dropout = dropout
         self.feature_dropout = feature_dropout
-        self.batch_norm = batch_norm
-        self.layer_norm = layer_norm
+        self.normalization = normalization
+        self.virtual_batch_size = virtual_batch_size
+        self.momentum = momentum
         self.initialization = initialization
         self.constant_value = constant_value
         self.leaky_relu_negative_slope = leaky_relu_negative_slope
@@ -206,7 +218,6 @@ class CatEmbMLPEstimator(BaseEstimator):
         self.batch_size = batch_size
         self.epochs = epochs
         self.learning_rate = learning_rate
-        self.momentum = momentum
         self.weight_decay = weight_decay
         self.early_stopping_patience = early_stopping_patience
         self.scale_numerical = scale_numerical
@@ -219,6 +230,8 @@ class CatEmbMLPEstimator(BaseEstimator):
         self.random_state = random_state
         self.lr_scheduler_patience = lr_scheduler_patience
         self.lr_scheduler_factor = lr_scheduler_factor
+        self.use_self_attention = use_self_attention
+        self.num_attention_heads = num_attention_heads
 
         if random_state is not None:
             torch.manual_seed(random_state)
@@ -228,7 +241,7 @@ class CatEmbMLPEstimator(BaseEstimator):
         self.cat_idxs = []
         self.cat_dims = []
         self.features = None
-        self.cat_features = None
+        self.cat_features = []
         self.is_fitted_ = False
         self.scaler = None
 
@@ -236,22 +249,55 @@ class CatEmbMLPEstimator(BaseEstimator):
         """Подготовка данных для обучения/предсказания"""
         if isinstance(X, pd.DataFrame):
             # Если X - это DataFrame, извлекаем признаки
-            features = X.columns.tolist()
+            if is_train:
+                # В режиме обучения определяем признаки из X
+                features = X.columns.tolist()
 
-            # Определяем категориальные признаки
-            cat_features = []
-            for col in features:
-                if X[col].dtype == 'object' or X[col].dtype.name == 'category':
-                    cat_features.append(col)
+                # Определяем категориальные признаки
+                if self.cat_features is None or len(self.cat_features) == 0:
+                    # Если категориальные признаки не указаны явно, определяем по типу данных
+                    cat_features = []
+                    for col in features:
+                        if X[col].dtype == 'object' or X[col].dtype.name == 'category':
+                            cat_features.append(col)
+                    self.cat_features = cat_features
+                else:
+                    # Используем указанные категориальные признаки
+                    cat_features = self.cat_features
+            else:
+                # При предсказании используем признаки из обучения
+                features = self.features
+                cat_features = self.cat_features if self.cat_features is not None else []
+
+            # Создаем копию датафрейма для безопасности и гарантируем правильный порядок колонок
+            X_processed = X[features].copy()
 
             # Индексы категориальных признаков
-            cat_idxs = [features.index(f) for f in cat_features]
+            cat_idxs = [features.index(f) for f in cat_features if f in features]
 
-            # Размерности категориальных признаков
+            # Размерности категориальных признаков и преобразование значений
             cat_dims = []
             for cat_feature in cat_features:
-                unique_values = X[cat_feature].nunique()
-                cat_dims.append(int(unique_values))
+                if cat_feature in X_processed.columns:
+                    # Если признак уже имеет тип category, получаем его коды
+                    if X_processed[cat_feature].dtype.name == 'category':
+                        # Получаем коды категорий, убеждаемся что они начинаются с 0
+                        X_processed[cat_feature] = X_processed[cat_feature].cat.codes
+                        # Заменяем -1 (для NaN) на 0, если такие есть
+                        X_processed[cat_feature] = X_processed[cat_feature].fillna(0).astype(int)
+                    else:
+                        # Преобразуем в категориальный тип
+                        X_processed[cat_feature] = X_processed[cat_feature].astype('category').cat.codes
+                        # Заменяем -1 (для NaN) на 0, если такие есть
+                        X_processed[cat_feature] = X_processed[cat_feature].fillna(0).astype(int)
+
+                    # Определяем размерность (количество уникальных значений)
+                    unique_values = X_processed[cat_feature].nunique()
+                    cat_dims.append(int(unique_values))
+                else:
+                    # Если признак отсутствует, пропускаем его
+                    if is_train:
+                        print(f"Предупреждение: категориальный признак '{cat_feature}' не найден в данных")
 
             # Преобразуем DataFrame в CatEmbDataset
             if y is not None:
@@ -263,7 +309,7 @@ class CatEmbMLPEstimator(BaseEstimator):
                     y_name = 'target'
                     y_df = pd.DataFrame({y_name: y})
 
-                df = pd.concat([X.reset_index(drop=True), y_df.reset_index(drop=True)], axis=1)
+                df = pd.concat([X_processed.reset_index(drop=True), y_df.reset_index(drop=True)], axis=1)
                 dataset = CatEmbDataset(
                     df, features, cat_features,
                     target_col=y_name,
@@ -280,7 +326,7 @@ class CatEmbMLPEstimator(BaseEstimator):
 
             else:
                 dataset = CatEmbDataset(
-                    X, features, cat_features,
+                    X_processed, features, cat_features,
                     scale_numerical=self.scale_numerical,
                     scale_method=self.scale_method,
                     n_bins=self.n_bins,
@@ -288,22 +334,29 @@ class CatEmbMLPEstimator(BaseEstimator):
                     is_multiclass=is_multiclass
                 )
 
-            self.features = features
-            self.cat_features = cat_features
-            self.cat_idxs = cat_idxs
-            self.cat_dims = cat_dims
+            if is_train:
+                self.features = features
+                self.cat_features = cat_features
+                self.cat_idxs = cat_idxs
+                self.cat_dims = cat_dims
 
         else:
             # Если X - это numpy array, используем существующие атрибуты
             if self.features is None or self.cat_features is None:
                 raise ValueError("При использовании numpy array необходимо предварительно обучить модель на DataFrame")
 
-            # Создаем DataFrame из numpy array
+            # Создаем DataFrame из numpy array с правильными именами колонок
             X_df = pd.DataFrame(X, columns=self.features)
+
+            # Преобразуем категориальные признаки
+            for cat_feature in self.cat_features:
+                if cat_feature in X_df.columns:
+                    X_df[cat_feature] = X_df[cat_feature].astype('category').cat.codes
+                    X_df[cat_feature] = X_df[cat_feature].fillna(0).astype(int)
 
             if y is not None:
                 y_df = pd.DataFrame({'target': y})
-                df = pd.concat([X_df, y_df], axis=1)
+                df = pd.concat([X_df.reset_index(drop=True), y_df.reset_index(drop=True)], axis=1)
                 dataset = CatEmbDataset(
                     df, self.features, self.cat_features,
                     target_col='target',
@@ -341,14 +394,17 @@ class CatEmbMLPEstimator(BaseEstimator):
             activation=self.activation,
             dropout=self.dropout,
             feature_dropout=self.feature_dropout,
-            batch_norm=self.batch_norm,
-            layer_norm=self.layer_norm,
+            normalization=self.normalization,
+            virtual_batch_size=self.virtual_batch_size,
+            momentum=self.momentum,
             initialization=self.initialization,
             constant_value=self.constant_value,
             leaky_relu_negative_slope=self.leaky_relu_negative_slope,
             dynamic_emb_size=self.dynamic_emb_size,
             min_emb_dim=self.min_emb_dim,
-            max_emb_dim=self.max_emb_dim
+            max_emb_dim=self.max_emb_dim,
+            use_self_attention=self.use_self_attention,
+            num_attention_heads=self.num_attention_heads
         )
 
     def _train_epoch(self, model, loader, optimizer, criterion, scheduler=None, pbar=True):
@@ -481,7 +537,7 @@ class CatEmbMLPEstimator(BaseEstimator):
         """Преобразование сырых предсказаний (переопределяется в дочерних классах)"""
         raise NotImplementedError("Метод должен быть переопределен в дочернем классе")
 
-    def fit(self, X, y, eval_set=None, eval_metric=None, mode=None, pbar=True):
+    def fit(self, X, y, eval_set=None, eval_metric=None, mode=None, cat_features=None, pbar=True):
         """Обучение модели CEMLP
 
         Параметры:
@@ -506,6 +562,9 @@ class CatEmbMLPEstimator(BaseEstimator):
             - 'max': чем больше, тем лучше (для accuracy, auc, r2)
             - 'min': чем меньше, тем лучше (для loss, mse, rmse)
             Если None, определяется на основе метрики
+        cat_features : list, optional (default=None)
+            Список имен категориальных признаков. Если указано, эти признаки будут обрабатываться как категориальные.
+            Если None, категориальные признаки определяются автоматически по типу данных.
         pbar : bool, optional (default=True)
             Отображать ли прогресс-бар при verbose=True
 
@@ -525,6 +584,10 @@ class CatEmbMLPEstimator(BaseEstimator):
         # Проверяем корректность режима
         if mode not in ['max', 'min']:
             raise ValueError("Параметр mode должен быть 'max' или 'min'")
+
+        # Если указаны категориальные признаки, сохраняем их
+        if cat_features is not None:
+            self.cat_features = cat_features
 
         # Подготавливаем обучающие данные с флагом is_train=True для обучения скейлера
         train_dataset = self._prepare_data(X, y, is_train=True)
@@ -661,13 +724,16 @@ class CatEmbMLPEstimator(BaseEstimator):
         self.is_fitted_ = True
         return self
 
-    def predict(self, X, pbar=True):
+    def predict(self, X, cat_features=None, pbar=True):
         """Предсказание целевых значений
 
         Параметры:
         -----------
         X : pandas.DataFrame или numpy.ndarray
             Входные признаки размерности (n_samples, n_features)
+        cat_features : list, optional (default=None)
+            Список имен категориальных признаков. Если указано, эти признаки будут обрабатываться как категориальные.
+            Если None, категориальные признаки определяются автоматически по типу данных.
         pbar : bool, optional (default=True)
             Отображать ли прогресс-бар при verbose=True
 
@@ -677,6 +743,10 @@ class CatEmbMLPEstimator(BaseEstimator):
             Предсказанные значения размерности (n_samples,)
         """
         self._check_is_fitted()
+
+        # Если указаны категориальные признаки, сохраняем их
+        if cat_features is not None:
+            self.cat_features = cat_features
 
         # Подготавливаем данные с обученным скейлером
         test_dataset = self._prepare_data(X, is_train=False)
@@ -702,6 +772,58 @@ class CatEmbMLPEstimator(BaseEstimator):
         predictions = self._transform_predictions(raw_predictions)
 
         return predictions
+
+    def predict_proba(self, X, cat_features=None, pbar=True):
+        """Предсказание вероятностей классов
+
+        Параметры:
+        -----------
+        X : pandas.DataFrame или numpy.ndarray
+            Входные признаки размерности (n_samples, n_features)
+        cat_features : list, optional (default=None)
+            Список имен категориальных признаков. Если указано, эти признаки будут обрабатываться как категориальные.
+            Если None, категориальные признаки определяются автоматически по типу данных.
+        pbar : bool, optional (default=True)
+            Отображать ли прогресс-бар при verbose=True
+
+        Возвращает:
+        -----------
+        y_proba : numpy.ndarray
+            Вероятности классов размерности (n_samples, 2)
+        """
+        self._check_is_fitted()
+
+        # Если указаны категориальные признаки, сохраняем их
+        if cat_features is not None:
+            self.cat_features = cat_features
+
+        # Подготавливаем данные с обученным скейлером
+        test_dataset = self._prepare_data(X, is_train=False)
+
+        # Создаем DataLoader для предсказания
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            persistent_workers=False if self.num_workers == 0 else True,
+            pin_memory=True
+        )
+
+        # Получаем предсказания
+        raw_predictions = self._get_predictions(self.model, test_loader, pbar=pbar)
+
+        # Закрываем DataLoader
+        del test_loader
+        gc.collect()
+
+        # Преобразуем логиты в вероятности
+        proba_1 = 1 / (1 + np.exp(-raw_predictions)).squeeze()
+
+        # Для scikit-learn API нужно возвращать вероятности для обоих классов
+        proba_0 = 1 - proba_1
+
+        return np.column_stack((proba_0, proba_1))
 
     def _check_is_fitted(self):
         """Проверка, что модель обучена"""
@@ -748,13 +870,16 @@ class CatEmbMLPBinary(CatEmbMLPEstimator):
         # Преобразуем вероятности в классы 0/1
         return (probabilities > 0.5).astype(int).squeeze()
 
-    def predict_proba(self, X, pbar=True):
+    def predict_proba(self, X, cat_features=None, pbar=True):
         """Предсказание вероятностей классов
 
         Параметры:
         -----------
         X : pandas.DataFrame или numpy.ndarray
             Входные признаки размерности (n_samples, n_features)
+        cat_features : list, optional (default=None)
+            Список имен категориальных признаков. Если указано, эти признаки будут преобразованы в тип 'category'.
+            Если None, категориальные признаки определяются автоматически по типу данных.
         pbar : bool, optional (default=True)
             Отображать ли прогресс-бар при verbose=True
 
@@ -764,6 +889,12 @@ class CatEmbMLPBinary(CatEmbMLPEstimator):
             Вероятности классов размерности (n_samples, 2)
         """
         self._check_is_fitted()
+
+        # Если X - DataFrame и указан список категориальных признаков, преобразуем их в тип 'category'
+        if isinstance(X, pd.DataFrame) and cat_features is not None:
+            for col in cat_features:
+                if col in X.columns:
+                    X[col] = X[col].astype('category')
 
         # Подготавливаем данные с обученным скейлером
         test_dataset = self._prepare_data(X, is_train=False)
@@ -852,7 +983,7 @@ class CatEmbMLPMulticlass(CatEmbMLPEstimator):
 
         return predicted_classes
 
-    def fit(self, X, y, eval_set=None, eval_metric=None, mode=None, pbar=True):
+    def fit(self, X, y, eval_set=None, eval_metric=None, mode=None, cat_features=None, pbar=True):
         """Обучение модели с предварительной кодировкой меток классов"""
         # Кодируем метки классов
         encoded_y = self.label_encoder.fit_transform(y)
@@ -864,15 +995,18 @@ class CatEmbMLPMulticlass(CatEmbMLPEstimator):
             eval_set = (X_val, encoded_y_val)
 
         # Обучаем модель с закодированными метками
-        return super().fit(X, encoded_y, eval_set=eval_set, eval_metric=eval_metric, mode=mode, pbar=pbar)
+        return super().fit(X, encoded_y, eval_set=eval_set, eval_metric=eval_metric, mode=mode, cat_features=cat_features, pbar=pbar)
 
-    def predict_proba(self, X, pbar=True):
+    def predict_proba(self, X, cat_features=None, pbar=True):
         """Предсказание вероятностей классов
 
         Параметры:
         -----------
         X : pandas.DataFrame или numpy.ndarray
             Входные признаки размерности (n_samples, n_features)
+        cat_features : list, optional (default=None)
+            Список имен категориальных признаков. Если указано, эти признаки будут преобразованы в тип 'category'.
+            Если None, категориальные признаки определяются автоматически по типу данных.
         pbar : bool, optional (default=True)
             Отображать ли прогресс-бар при verbose=True
 
@@ -882,6 +1016,12 @@ class CatEmbMLPMulticlass(CatEmbMLPEstimator):
             Вероятности классов размерности (n_samples, n_classes)
         """
         self._check_is_fitted()
+
+        # Если X - DataFrame и указан список категориальных признаков, преобразуем их в тип 'category'
+        if isinstance(X, pd.DataFrame) and cat_features is not None:
+            for col in cat_features:
+                if col in X.columns:
+                    X[col] = X[col].astype('category')
 
         # Подготавливаем данные с обученным скейлером
         test_dataset = self._prepare_data(X, is_train=False)
