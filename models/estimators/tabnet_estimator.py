@@ -145,6 +145,15 @@ class TabNetEstimator(BaseEstimator):
     random_state : int, default=None
         Случайное состояние для воспроизводимости результатов.
 
+    dynamic_emb_size : bool, default=False
+        Использовать ли динамический размер эмбеддингов
+
+    min_emb_dim : int, default=2
+        Минимальный размер эмбеддинга
+
+    max_emb_dim : int, default=16
+        Максимальный размер эмбеддинга
+
     Примечания
     ----------
     TabNet поддерживает как числовые, так и категориальные признаки. Категориальные
@@ -211,7 +220,10 @@ class TabNetEstimator(BaseEstimator):
                  output_dim=1,  # Размерность выходного слоя
                  verbose=True,  # Вывод прогресса обучения
                  num_workers=0,  # Количество worker-процессов для DataLoader (0 - однопроцессный режим)
-                 random_state=42):  # Случайное состояние для воспроизводимости
+                 random_state=42,  # Случайное состояние для воспроизводимости
+                 dynamic_emb_size=False,  # Использовать ли динамический размер эмбеддингов
+                 min_emb_dim=2,  # Минимальный размер эмбеддинга
+                 max_emb_dim=16):  # Максимальный размер эмбеддинга
 
         self.cat_emb_dim = cat_emb_dim
         self.n_steps = n_steps
@@ -239,6 +251,9 @@ class TabNetEstimator(BaseEstimator):
         self.verbose = verbose
         self.num_workers = num_workers
         self.random_state = random_state
+        self.dynamic_emb_size = dynamic_emb_size
+        self.min_emb_dim = min_emb_dim
+        self.max_emb_dim = max_emb_dim
 
         if random_state is not None:
             torch.manual_seed(random_state)
@@ -273,8 +288,12 @@ class TabNetEstimator(BaseEstimator):
         # Размерности категориальных признаков
         cat_dims = []
         for cat_feature in cat_features:
-            unique_values = X[cat_feature].nunique()
-            cat_dims.append(int(unique_values))
+            # Используем max()+1 вместо nunique() для определения размерности эмбеддингов,
+            # чтобы избежать ошибок индексации при разреженных категориальных значениях
+            max_value = X[cat_feature].max()
+            # Для случая, если признак пустой или содержит только отрицательные значения
+            cat_dim = int(max(max_value + 1, 1))
+            cat_dims.append(cat_dim)
 
         # Преобразуем DataFrame в CatEmbDataset
         if y is not None:
@@ -333,7 +352,10 @@ class TabNetEstimator(BaseEstimator):
             lambda_sparse=self.lambda_sparse,
             virtual_batch_size=self.virtual_batch_size,
             momentum=self.momentum,
-            output_dim=self.output_dim
+            output_dim=self.output_dim,
+            dynamic_emb_size=self.dynamic_emb_size,
+            min_emb_dim=self.min_emb_dim,
+            max_emb_dim=self.max_emb_dim
         )
 
     def _train_epoch(self, model, loader, optimizer, criterion, scheduler=None, pbar=True):

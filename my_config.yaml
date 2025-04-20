@@ -128,28 +128,35 @@ models:
         n_folds: 1
         use_custom_hyperparameters: true
         hyperparameters:
-            cat_emb_dim: 4 # размерность эмбеддингов для категориальных признаков, диапазон [1-16]
-            n_steps: 4 # количество шагов в TabNet, диапазон [3-10]
-            hidden_dim: 16 # размерность скрытого слоя, диапазон [8-128]
-            decision_dim: 8 # размерность решающего слоя, диапазон [4-64]
-            n_glu_layers: 3 # количество GLU слоев, диапазон [2-4]
-            dropout: 0.1 # вероятность дропаута, диапазон [0.1-0.9]
-            gamma: 1.5 # коэффициент затухания для масок внимания, диапазон [1.0-2.0]
-            lambda_sparse: 0.0001 # коэффициент регуляризации разреженности, диапазон [0-0.01]
-            virtual_batch_size: 128 # размер виртуального батча, диапазон [128-4096]
-            momentum: 0.9 # параметр momentum для BatchNorm, диапазон [0.6-0.98]
-            batch_size: 1024 # размер батча для обучения, диапазон [256-32768]
-            epochs: 50 # количество эпох обучения, диапазон {20, 50, 100, 200, ...}
-            learning_rate: 0.01 # скорость обучения, диапазон [0.001-0.025]
-            early_stopping_patience: 5 # количество эпох без улучшения до остановки обучения
-            weight_decay: 1e-5 # L2-регуляризация для оптимизатора
-            scale_numerical: true # масштабировать ли числовые признаки
-            scale_method: "standard" # метод масштабирования числовых признаков (standard, minmax, quantile, binning)
-            n_bins: 10 # количество бинов для binning
-            device: cuda # устройство для обучения (cuda/cpu)
-            verbose: true # выводить ли прогресс обучения
-            num_workers: 0 # количество worker-процессов для DataLoader (0 - однопроцессный режим)
-            random_state: 42 # seed для генерации случайных чисел
+            cat_emb_dim: 4           # Размерность эмбеддингов для категориальных признаков
+            n_steps: 4               # Количество шагов в TabNet
+            n_d: 16                  # Размерность выхода decision component (Nd)
+            n_a: 16                  # Размерность выхода attention component (Na)
+            decision_dim: 8          # Размерность решающего слоя
+            n_glu_layers: 3          # Количество GLU слоев
+            dropout: 0.1             # Вероятность дропаута
+            gamma: 1.5               # Коэффициент затухания для масок внимания
+            lambda_sparse: 0.0001    # Коэффициент регуляризации разреженности
+            virtual_batch_size: 128  # Размер виртуального батча для Ghost BatchNorm
+            momentum: 0.9            # Параметр momentum для BatchNorm
+            batch_size: 1024         # Размер батча для обучения
+            epochs: 50               # Количество эпох обучения
+            learning_rate: 0.01      # Скорость обучения
+            early_stopping_patience: 5  # Количество эпох без улучшения до остановки
+            weight_decay: 1e-5       # L2-регуляризация для оптимизатора
+            reducelronplateau_patience: 10  # Количество эпох без улучшения до снижения learning rate
+            reducelronplateau_factor: 0.7   # Коэффициент снижения learning rate [0.7-0.9]
+            scale_numerical: true    # Масштабировать ли числовые признаки
+            scale_method: "standard" # Метод масштабирования числовых признаков
+            n_bins: 10               # Количество бинов для binning
+            device: cuda             # Устройство для обучения (cuda/cpu)
+            output_dim: 1            # Размерность выходного слоя
+            verbose: true            # Вывод прогресса обучения
+            num_workers: 0           # Количество worker-процессов для DataLoader
+            random_state: 42         # Seed для генерации случайных чисел
+            dynamic_emb_size: false  # Использовать ли динамический размер эмбеддингов
+            min_emb_dim: 2           # Минимальный размер эмбеддинга
+            max_emb_dim: 16          # Максимальный размер эмбеддинга
     cemlp:
         n_folds: 1
         use_custom_hyperparameters: true

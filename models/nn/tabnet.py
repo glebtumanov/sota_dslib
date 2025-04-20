@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import math
 
 
 def sparsemax(x, dim=-1):
@@ -139,7 +140,10 @@ class TabNet(nn.Module):
                  lambda_sparse=0.0001,
                  virtual_batch_size=128,
                  momentum=0.9,
-                 output_dim=1):
+                 output_dim=1,
+                 dynamic_emb_size=False,  # Параметр для динамического размера эмбеддингов
+                 min_emb_dim=2,  # Минимальный размер эмбеддинга
+                 max_emb_dim=16):  # Максимальный размер эмбеддинга
         super().__init__()
 
         self.cat_idxs = cat_idxs
@@ -153,14 +157,27 @@ class TabNet(nn.Module):
         self.momentum = momentum
         self.n_d = n_d  # Сохраняем размерность для решающего слоя
         self.n_a = n_a  # Сохраняем размерность для блока внимания
+        self.dynamic_emb_size = dynamic_emb_size
+        self.min_emb_dim = min_emb_dim
+        self.max_emb_dim = max_emb_dim
 
-        # Эмбеддинги для категориальных признаков
+        # Определяем размеры эмбеддингов - динамически или фиксированным размером
+        if self.dynamic_emb_size and len(cat_dims) > 0:
+            # Для каждой категориальной переменной вычисляем размер эмбеддинга
+            # исходя из формулы log2(размер_категории) + 1, но не меньше min_emb_dim и не больше max_emb_dim
+            self.emb_dims = [min(max(int(math.ceil(np.log2(dim))) + 1, self.min_emb_dim), self.max_emb_dim)
+                             for dim in cat_dims]
+        else:
+            # Используем фиксированный размер для всех категориальных переменных
+            self.emb_dims = [cat_emb_dim] * len(cat_dims)
+
+        # Эмбеддинги для категориальных признаков с динамическими размерами
         self.embeddings = nn.ModuleList(
-            [nn.Embedding(cat_dim, cat_emb_dim) for cat_dim in cat_dims]
+            [nn.Embedding(cat_dim, emb_dim) for cat_dim, emb_dim in zip(cat_dims, self.emb_dims)]
         )
 
-        # Размерность признаков после эмбеддингов
-        self.post_embed_dim = input_dim - len(cat_idxs) + len(cat_idxs) * cat_emb_dim
+        # Размерность признаков после эмбеддингов (с учетом динамических размеров)
+        self.post_embed_dim = input_dim - len(cat_idxs) + sum(self.emb_dims)
 
         self.feature_transformers = nn.ModuleList()
         self.attentive_transformers = nn.ModuleList()

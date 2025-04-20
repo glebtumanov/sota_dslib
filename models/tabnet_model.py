@@ -38,7 +38,10 @@ class TabNetModel(BaseModel):
         model.fit(
             X_train,
             y_train,
-            eval_set=(X_test, y_test)
+            eval_set=(X_test, y_test),
+            eval_metric='accuracy',
+            mode='max',
+            cat_features=self.cat_features
         )
 
         return model
@@ -107,7 +110,10 @@ class TabNetModel(BaseModel):
             'output_dim': 1,
             'verbose': True,
             'num_workers': 0,
-            'random_state': 42
+            'random_state': 42,
+            'dynamic_emb_size': False,
+            'min_emb_dim': 2,
+            'max_emb_dim': 16
         }
 
     def _get_default_hp_binary(self):
