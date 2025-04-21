@@ -227,7 +227,9 @@ class TabNet(nn.Module):
             # Применяем эмбеддинги к категориальным признакам
             embedded_cats = []
             for i, cat_values in enumerate(x_cat):
-                embedded_cats.append(self.embeddings[i](cat_values))
+                # Добавляем безопасную индексацию - ограничиваем значения диапазоном эмбеддинга
+                safe_indices = torch.clamp(cat_values, 0, self.cat_dims[i] - 1)
+                embedded_cats.append(self.embeddings[i](safe_indices))
 
             # Объединяем все признаки
             if embedded_cats:

@@ -58,105 +58,105 @@ models:
         n_folds: 3
         use_custom_hyperparameters: true
         hyperparameters:
-            iterations: 1000 # число итераций (деревьев), int, [100-10000]
-            learning_rate: null # скорость обучения, float, [0.001-1.0]
-            depth: null # глубина дерева, int, [2-16]
-            l2_leaf_reg: null # L2-регуляризация листьев, float, [1-10]
-            border_count: null # число бинов для числовых признаков, int, [32-255]
-            random_seed: 42 # seed для генерации случайных чисел, int
-            use_best_model: null # использовать лучшую модель на валидации, bool
-            auto_class_weights: null # автоматические веса классов: None, 'Balanced', 'SqrtBalanced'
-            one_hot_max_size: null # максимальный размер для one-hot, int, [2-255]
-            random_strength: null # сила случайности при разбиении, float, [0-10]
-            bagging_temperature: null # температура бэггинга, float, [0-10]
-            subsample: null # доля сэмплируемых объектов, float, [0.1-1.0]
-            early_stopping_rounds: null # ранняя остановка, int, [10-1000]
-            min_data_in_leaf: null # мин. число объектов в листе, int, [1-100]
-            max_leaves: null # макс. число листьев, int, [2-64]
-            langevin: null # использовать стохастический градиент (Langevin), bool
-            bootstrap_type: Bayesian # тип бутстрепа: Bayesian, Bernoulli, MVS, Poisson
+            iterations: 1000             # число итераций (деревьев), int, [100-10000]
+            learning_rate: 0.01          # скорость обучения, float, [0.001-1.0]
+            depth: 10                    # глубина дерева, int, [2-16]
+            l2_leaf_reg: 1               # L2-регуляризация листьев, float, [1-10]
+            border_count: 100            # число бинов для числовых признаков, int, [32-255]
+            random_seed: 42              # seed для генерации случайных чисел, int
+            use_best_model: true         # использовать лучшую модель на валидации, bool
+            auto_class_weights: Balanced # автоматические веса классов: None, 'Balanced', 'SqrtBalanced'
+            one_hot_max_size: 100        # максимальный размер для one-hot, int, [2-255]
+            random_strength: 0.5         # сила случайности при разбиении, float, [0-10]
+            bagging_temperature: 0.5     # температура бэггинга, float, [0-10]
+            subsample: 0.8               # доля сэмплируемых объектов, float, [0.1-1.0]
+            early_stopping_rounds: 100   # ранняя остановка, int, [10-1000]
+            min_data_in_leaf: 100        # мин. число объектов в листе, int, [1-100]
+            max_leaves: 64               # макс. число листьев, int, [2-64]
+            langevin: true               # использовать стохастический градиент (Langevin), bool
+            bootstrap_type: Bayesian     # тип бутстрепа: Bayesian, Bernoulli, MVS, Poisson
     lightgbm:
         n_folds: 3
         use_custom_hyperparameters: false
         hyperparameters:
-            boosting_type: 'gbdt' # тип бустинга: gbdt, dart, goss, rf
-            num_boost_round: 1000 # число итераций (деревьев), int, [100-10000]
-            metric: 'auc' # метрика, например auc, binary_logloss, multi_logloss
-            n_jobs: 12 # число потоков, int
-            verbosity: -1 # уровень логирования, int
-            seed: 77 # seed для генерации случайных чисел, int
-            max_depth: 16 # максимальная глубина дерева, int, [2-64]
-            num_leaves: 63 # число листьев, int, [2-1024]
-            learning_rate: 0.06 # скорость обучения, float, [0.001-1.0]
-            min_child_samples: 4 # мин. число объектов в листе, int, [1-100]
-            colsample_bytree: 0.3 # доля признаков для каждого дерева, float, [0.1-1.0]
-            subsample: 0.85 # доля сэмплируемых объектов, float, [0.1-1.0]
-            subsample_freq: 10 # частота сэмплирования, int
-            max_bin: 100 # число бинов для числовых признаков, int, [32-255]
-            min_child_weight: 1.0 # мин. вес в листе, float, [0-10]
-            min_split_gain: 0.015 # мин. прирост для сплита, float, [0-1]
-            reg_lambda: 5.6 # L2-регуляризация, float, [0-10]
-            reg_alpha: 0.5 # L1-регуляризация, float, [0-10]
+            boosting_type: 'gbdt'      # тип бустинга: gbdt, dart, goss, rf
+            num_boost_round: 1000      # число итераций (деревьев), int, [100-10000]
+            metric: 'auc'              # метрика, например auc, binary_logloss, multi_logloss
+            n_jobs: 12                 # число потоков, int
+            verbosity: -1              # уровень логирования, int
+            seed: 77                   # seed для генерации случайных чисел, int
+            max_depth: 16              # максимальная глубина дерева, int, [2-64]
+            num_leaves: 63             # число листьев, int, [2-1024]
+            learning_rate: 0.06        # скорость обучения, float, [0.001-1.0]
+            min_child_samples: 4       # мин. число объектов в листе, int, [1-100]
+            colsample_bytree: 0.3      # доля признаков для каждого дерева, float, [0.1-1.0]
+            subsample: 0.85            # доля сэмплируемых объектов, float, [0.1-1.0]
+            subsample_freq: 10         # частота сэмплирования, int
+            max_bin: 100               # число бинов для числовых признаков, int, [32-255]
+            min_child_weight: 1.0      # мин. вес в листе, float, [0-10]
+            min_split_gain: 0.015      # мин. прирост для сплита, float, [0-1]
+            reg_lambda: 5.6            # L2-регуляризация, float, [0-10]
+            reg_alpha: 0.5             # L1-регуляризация, float, [0-10]
             early_stopping_rounds: 100 # ранняя остановка, int, [10-1000]
-            silent: True # отключить вывод логов, bool
+            silent: True               # отключить вывод логов, bool
     xgboost:
         n_folds: 3
         use_custom_hyperparameters: false
         hyperparameters:
-            n_estimators: 1000 # число деревьев, int, [100-10000]
-            n_jobs: 16 # число потоков, int
-            eval_metric: 'auc' # метрика, например auc, logloss, error
+            n_estimators: 1000         # число деревьев, int, [100-10000]
+            n_jobs: 16                 # число потоков, int
+            eval_metric: 'auc'         # метрика, например auc, logloss, error
             early_stopping_rounds: 200 # ранняя остановка, int, [10-1000]
-            tree_method: 'hist' # метод построения дерева: auto, exact, approx, hist, gpu_hist
-            max_depth: 10 # максимальная глубина дерева, int, [2-64]
-            learning_rate: 0.03 # скорость обучения, float, [0.001-1.0]
-            max_bin: 100 # число бинов для числовых признаков, int, [32-255]
-            subsample: 0.9 # доля сэмплируемых объектов, float, [0.1-1.0]
-            colsample_bylevel: 0.5 # доля признаков на уровень, float, [0.1-1.0]
+            tree_method: 'hist'        # метод построения дерева: auto, exact, approx, hist, gpu_hist
+            max_depth: 10              # максимальная глубина дерева, int, [2-64]
+            learning_rate: 0.03        # скорость обучения, float, [0.001-1.0]
+            max_bin: 100               # число бинов для числовых признаков, int, [32-255]
+            subsample: 0.9             # доля сэмплируемых объектов, float, [0.1-1.0]
+            colsample_bylevel: 0.5     # доля признаков на уровень, float, [0.1-1.0]
     random_forest:
         n_folds: 3
         use_custom_hyperparameters: false
         hyperparameters:
-            n_jobs: -1 # число потоков, int
-            random_state: 5 # seed для генерации случайных чисел, int
+            n_jobs: -1         # число потоков, int
+            random_state: 5    # seed для генерации случайных чисел, int
             n_estimators: 1000 # число деревьев, int, [100-10000]
-            max_depth: 100 # максимальная глубина дерева, int, [2-100]
-            max_samples: 0.5 # доля сэмплируемых объектов, float, [0.1-1.0]
-            bootstrap: true # использовать бутстрэппинг, bool
-            verbose: 0 # уровень логирования, int
+            max_depth: 100     # максимальная глубина дерева, int, [2-100]
+            max_samples: 0.5   # доля сэмплируемых объектов, float, [0.1-1.0]
+            bootstrap: true    # использовать бутстрэппинг, bool
+            verbose: 0         # уровень логирования, int
     tabnet:
         n_folds: 1
         use_custom_hyperparameters: true
         hyperparameters:
-            cat_emb_dim: 4           # Размерность эмбеддингов для категориальных признаков
-            n_steps: 4               # Количество шагов в TabNet
-            n_d: 16                  # Размерность выхода decision component (Nd)
-            n_a: 16                  # Размерность выхода attention component (Na)
-            decision_dim: 8          # Размерность решающего слоя
-            n_glu_layers: 3          # Количество GLU слоев
-            dropout: 0.1             # Вероятность дропаута
-            gamma: 1.5               # Коэффициент затухания для масок внимания
-            lambda_sparse: 0.0001    # Коэффициент регуляризации разреженности
-            virtual_batch_size: 128  # Размер виртуального батча для Ghost BatchNorm
-            momentum: 0.9            # Параметр momentum для BatchNorm
-            batch_size: 1024         # Размер батча для обучения
-            epochs: 50               # Количество эпох обучения
-            learning_rate: 0.01      # Скорость обучения
-            early_stopping_patience: 5  # Количество эпох без улучшения до остановки
-            weight_decay: 1e-5       # L2-регуляризация для оптимизатора
-            reducelronplateau_patience: 10  # Количество эпох без улучшения до снижения learning rate
-            reducelronplateau_factor: 0.7   # Коэффициент снижения learning rate [0.7-0.9]
-            scale_numerical: true    # Масштабировать ли числовые признаки
-            scale_method: "standard" # Метод масштабирования числовых признаков
-            n_bins: 10               # Количество бинов для binning
-            device: cuda             # Устройство для обучения (cuda/cpu)
-            output_dim: 1            # Размерность выходного слоя
-            verbose: true            # Вывод прогресса обучения
-            num_workers: 0           # Количество worker-процессов для DataLoader
-            random_state: 42         # Seed для генерации случайных чисел
-            dynamic_emb_size: false  # Использовать ли динамический размер эмбеддингов
-            min_emb_dim: 2           # Минимальный размер эмбеддинга
-            max_emb_dim: 16          # Максимальный размер эмбеддинга
+            cat_emb_dim: 4                # Размерность эмбеддингов для категориальных признаков
+            n_steps: 6                    # Количество шагов в TabNet
+            n_d: 32                       # Размерность выхода decision component (Nd)
+            n_a: 32                       # Размерность выхода attention component (Na)
+            decision_dim: 16              # Размерность решающего слоя
+            n_glu_layers: 4               # Количество GLU слоев
+            dropout: 0.2                  # Вероятность дропаута
+            gamma: 1.5                    # Коэффициент затухания для масок внимания
+            lambda_sparse: 0.0001         # Коэффициент регуляризации разреженности
+            virtual_batch_size: 128       # Размер виртуального батча для Ghost BatchNorm
+            momentum: 0.9                 # Параметр momentum для BatchNorm
+            batch_size: 1024              # Размер батча для обучения
+            epochs: 200                   # Количество эпох обучения
+            learning_rate: 0.001          # Скорость обучения
+            early_stopping_patience: 3    # Количество эпох без улучшения до остановки
+            weight_decay: 1e-5            # L2-регуляризация для оптимизатора
+            reducelronplateau_patience: 3 # Количество эпох без улучшения до снижения learning rate
+            reducelronplateau_factor: 0.6 # Коэффициент снижения learning rate [0.7-0.9]
+            scale_numerical: true         # Масштабировать ли числовые признаки
+            scale_method: "standard"      # Метод масштабирования числовых признаков
+            n_bins: 10                    # Количество бинов для binning
+            device: cuda                  # Устройство для обучения (cuda/cpu)
+            output_dim: 1                 # Размерность выходного слоя
+            verbose: true                 # Вывод прогресса обучения
+            num_workers: 0                # Количество worker-процессов для DataLoader
+            random_state: 42              # Seed для генерации случайных чисел
+            dynamic_emb_size: true        # Использовать ли динамический размер эмбеддингов
+            min_emb_dim: 1                # Минимальный размер эмбеддинга
+            max_emb_dim: 16               # Максимальный размер эмбеддинга
     cemlp:
         n_folds: 1
         use_custom_hyperparameters: true

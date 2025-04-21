@@ -288,11 +288,9 @@ class TabNetEstimator(BaseEstimator):
         # Размерности категориальных признаков
         cat_dims = []
         for cat_feature in cat_features:
-            # Используем max()+1 вместо nunique() для определения размерности эмбеддингов,
-            # чтобы избежать ошибок индексации при разреженных категориальных значениях
-            max_value = X[cat_feature].max()
-            # Для случая, если признак пустой или содержит только отрицательные значения
-            cat_dim = int(max(max_value + 1, 1))
+            # Используем nunique() вместо max()+1 для более точного определения размерности
+            # и добавляем +1 для обработки неизвестных категорий в тестовых данных
+            cat_dim = int(X[cat_feature].nunique() + 1)
             cat_dims.append(cat_dim)
 
         # Преобразуем DataFrame в CatEmbDataset

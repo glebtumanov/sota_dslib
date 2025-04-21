@@ -121,31 +121,8 @@ models:
         n_folds: 1
         use_custom_hyperparameters: true
         hyperparameters:
-            cat_emb_dim: 6
-            n_steps: 5
-            n_d: 64
-            n_a: 64
-            decision_dim: 32
-            n_glu_layers: 3
-            dropout: 0.1
-            gamma: 1.5
-            lambda_sparse: 0.0001
-            virtual_batch_size: 512
-            momentum: 0.7
-            batch_size: 16384
-            epochs: 1000
-            learning_rate: 0.05
-            early_stopping_patience: 20
-            weight_decay: 1e-5
-            reducelronplateau_patience: 5
-            reducelronplateau_factor: 0.7
-            scale_numerical: true
-            scale_method: "standard"
-            n_bins: 10
-            device: cuda
-            output_dim: 1
-            verbose: false
-            num_workers: 0
+            dropout: 0.3
+            learning_rate: 0.001
             random_state: 42
             n_classes: 7
     cemlp:
