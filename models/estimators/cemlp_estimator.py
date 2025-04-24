@@ -171,36 +171,38 @@ class CatEmbMLPEstimator(BaseEstimator):
 
     def __init__(self,
                  cat_emb_dim=4,
-                 hidden_dims=[64, 32],
-                 activation='relu',
-                 dropout=0.1,
+                 hidden_dims=[512, 256],
+                 activation='swish',
+                 dropout=0.2,
                  feature_dropout=0.0,
-                 normalization='batch',
+                 normalization='ghost_batch',
                  virtual_batch_size=128,
                  momentum=0.9,
-                 initialization='he_normal',
+                 initialization='xavier_uniform',
                  constant_value=0.001,
                  leaky_relu_negative_slope=0.1,
                  dynamic_emb_size=False,
                  min_emb_dim=2,
                  max_emb_dim=16,
                  batch_size=1024,
-                 epochs=50,
+                 epochs=200,
                  learning_rate=0.001,
                  weight_decay=1e-5,
-                 early_stopping_patience=5,
+                 early_stopping_patience=15,
                  scale_numerical=True,
                  scale_method="standard",
                  n_bins=10,
                  device=None,
                  output_dim=1,
-                 verbose=True,
+                 verbose=False,
                  num_workers=0,
                  random_state=None,
-                 lr_scheduler_patience=10,
-                 lr_scheduler_factor=0.5,
+                 lr_scheduler_patience=5,
+                 lr_scheduler_factor=0.7,
                  use_self_attention=False,
-                 num_attention_heads=4):
+                 attn_dropout=0.1,
+                 d_model=80,
+                 num_attention_heads=2):
         self.cat_emb_dim = cat_emb_dim
         self.hidden_dims = hidden_dims
         self.activation = activation
@@ -231,7 +233,9 @@ class CatEmbMLPEstimator(BaseEstimator):
         self.lr_scheduler_patience = lr_scheduler_patience
         self.lr_scheduler_factor = lr_scheduler_factor
         self.use_self_attention = use_self_attention
+        self.attn_dropout = attn_dropout
         self.num_attention_heads = num_attention_heads
+        self.d_model = d_model
 
         if random_state is not None:
             torch.manual_seed(random_state)

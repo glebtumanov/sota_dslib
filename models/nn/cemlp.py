@@ -39,60 +39,43 @@ class GhostBatchNorm(nn.Module):
 
 
 class MultiHeadSelfAttention(nn.Module):
-    """Модуль многоголового self-attention для табличных данных.
-
-    Параметры:
-    -----------
-    embed_dim : int
-        Размерность входных данных/эмбеддингов
-    num_heads : int
-        Количество голов внимания
-    dropout : float, default=0.0
-        Вероятность дропаута для attention весов
-    """
-    def __init__(self, embed_dim, num_heads, dropout=0.0):
+    def __init__(self, d_model: int, n_heads: int, p_drop: float = 0.1):
         super().__init__()
-        self.embed_dim = embed_dim
-        self.num_heads = num_heads
-        self.head_dim = embed_dim // num_heads
+        assert d_model % n_heads == 0, f"d_model ({d_model}) должно быть кратно n_heads ({n_heads})"
+        self.d_head = d_model // n_heads
+        self.qkv = nn.Linear(d_model, 3 * d_model, bias=False)
+        self.proj = nn.Linear(d_model, d_model, bias=False)
+        self.drop = nn.Dropout(p_drop)
+        self.n_heads = n_heads
 
-        assert self.head_dim * num_heads == embed_dim, \
-            f"embed_dim {embed_dim} должно быть кратно num_heads {num_heads}"
+    def _split(self, x):
+        # (B, N, D) → (B, H, N, d_head)
+        B, N, D = x.shape
+        return x.view(B, N, self.n_heads, self.d_head).transpose(1, 2)
 
-        self.query = nn.Linear(embed_dim, embed_dim)
-        self.key = nn.Linear(embed_dim, embed_dim)
-        self.value = nn.Linear(embed_dim, embed_dim)
-        self.out_proj = nn.Linear(embed_dim, embed_dim)
-
-        self.dropout = nn.Dropout(dropout)
+    def _merge(self, x):
+        # (B, H, N, d_head) → (B, N, D)
+        B, H, N, d = x.shape
+        return x.transpose(1, 2).reshape(B, N, H * d)
 
     def forward(self, x):
-        # x: [batch_size, seq_len, embed_dim] = [bs, feature_dim, emb_dim]
-        batch_size, seq_len, _ = x.shape
+        q, k, v = self.qkv(x).chunk(3, dim=-1)
+        q, k, v = map(self._split, (q, k, v))
+        attn = (q @ k.transpose(-2, -1)) / math.sqrt(self.d_head)
+        attn = self.drop(attn.softmax(-1))
+        out = self._merge(attn @ v)
+        return self.proj(out) + x            # residual
 
-        # Проекции с разделением на головы
-        # [batch_size, seq_len, embed_dim] -> [batch_size, seq_len, num_heads, head_dim]
-        q = self.query(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        k = self.key(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        v = self.value(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+class NumericEmbedding(nn.Module):
+    """Каждый числовой скаляр x → вектор x * w_i + b_i (w_i, b_i — обучаемые)."""
+    def __init__(self, num_numeric: int, d_model: int):
+        super().__init__()
+        self.weight = nn.Parameter(torch.randn(num_numeric, d_model))
+        self.bias   = nn.Parameter(torch.zeros(num_numeric, d_model))
 
-        # Масштабируем скалярное произведение
-        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
-
-        # Получаем attention weights с помощью softmax
-        attention_weights = F.softmax(scores, dim=-1)
-        attention_weights = self.dropout(attention_weights)
-
-        # Применяем attention weights к value
-        context = torch.matmul(attention_weights, v)
-
-        # [batch_size, num_heads, seq_len, head_dim] -> [batch_size, seq_len, embed_dim]
-        context = context.transpose(1, 2).contiguous().view(batch_size, seq_len, self.embed_dim)
-
-        # Финальная проекция
-        output = self.out_proj(context)
-
-        return output
+    def forward(self, x_num):                # x_num: (B, F_num)
+        # (B, F_num, D)
+        return x_num.unsqueeze(-1) * self.weight + self.bias
 
 
 class CatEmbMLP(nn.Module):
@@ -119,6 +102,8 @@ class CatEmbMLP(nn.Module):
         Функция активации ('relu', 'leaky_relu', 'selu', 'elu', 'gelu', 'swish')
     dropout : float, default=0.1
         Вероятность дропаута для регуляризации
+    attn_dropout : float, default=0.1
+        Вероятность дропаута для attention
     normalization : str, default='batch'
         Тип нормализации ('batch', 'layer', 'ghost_batch')
     virtual_batch_size : int, default=128
@@ -144,6 +129,8 @@ class CatEmbMLP(nn.Module):
         Использовать ли self-attention механизм для признаков
     num_attention_heads : int, default=4
         Количество голов внимания при use_self_attention=True
+    d_model : int, default=80
+        Размерность эмбеддингов для self-attention
     """
     def __init__(self,
                  input_dim,
@@ -154,6 +141,7 @@ class CatEmbMLP(nn.Module):
                  output_dim=1,
                  activation='relu',
                  dropout=0.1,
+                 attn_dropout=0.1,
                  normalization='batch',
                  virtual_batch_size=128,
                  momentum=0.9,
@@ -165,6 +153,7 @@ class CatEmbMLP(nn.Module):
                  min_emb_dim=2,
                  max_emb_dim=16,
                  use_self_attention=False,
+                 d_model=80,
                  num_attention_heads=4):
         super().__init__()
         self.cat_idxs = cat_idxs
@@ -187,6 +176,8 @@ class CatEmbMLP(nn.Module):
         self.max_emb_dim = max_emb_dim
         self.use_self_attention = use_self_attention
         self.num_attention_heads = num_attention_heads
+        self.d_model = d_model
+        self.attn_dropout = attn_dropout
 
         # Проверяем корректность параметра нормализации
         if normalization not in ['batch', 'layer', 'ghost_batch']:
@@ -194,35 +185,44 @@ class CatEmbMLP(nn.Module):
                             "Допустимые значения: 'batch', 'layer', 'ghost_batch'")
 
         # Эмбеддинги для категориальных признаков
-        # Если используется self-attention, устанавливаем размер эмбеддинга = 1
         if self.use_self_attention:
-            emb_dims = [1 for _ in cat_dims]
+            # Для self‑attention представляем каждый признак в d_model‑мерном пространстве
+            emb_dims = [self.d_model for _ in cat_dims]
+            numeric_emb_dim = self.d_model
         elif self.dynamic_emb_size:
             emb_dims = [min(max(int(math.ceil(np.log2(dim))) + 1, self.min_emb_dim), self.max_emb_dim) for dim in cat_dims]
+            numeric_emb_dim = self.cat_emb_dim
         else:
             emb_dims = [self.cat_emb_dim for _ in cat_dims]
+            numeric_emb_dim = self.cat_emb_dim
 
-        self.embeddings = nn.ModuleList(
+        self.cat_emb = nn.ModuleList(
             [nn.Embedding(cat_dim, emb_dim) for cat_dim, emb_dim in zip(cat_dims, emb_dims)]
         )
-        # Размерность признаков после эмбеддингов
-        self.post_embed_dim = input_dim - len(cat_idxs) + sum(emb_dims)
+        # Число числовых признаков для последующих вычислений
+        num_numeric = input_dim - len(cat_idxs)
+
+        # Если используется self‑attention, размер вектора признака после него равен d_model,
+        # иначе — размеру эмбеддинга числового/категориального признака.
+        if self.use_self_attention:
+            # (кол‑во признаков) * d_model
+            self.post_embed_dim = (input_dim) * self.d_model
+        else:
+            # Числовые признаки → num_numeric * cat_emb_dim
+            # Категориальные признаки → сумма их индивидуальных emb_dims
+            self.post_embed_dim = num_numeric * self.cat_emb_dim + sum(emb_dims)
+
+        self.num_emb = NumericEmbedding(num_numeric, numeric_emb_dim)
 
         # Feature-wise dropout
         self.input_dropout = nn.Dropout(self.feature_dropout) if self.feature_dropout > 0 else nn.Identity()
 
         # Self-attention для признаков
         if self.use_self_attention:
-            # Для self-attention, где каждый признак - элемент последовательности
-            # Размерность эмбеддинга для внимания равна num_attention_heads
             self.self_attention = MultiHeadSelfAttention(
-                embed_dim=self.num_attention_heads,
-                num_heads=self.num_attention_heads,
-                dropout=self.dropout
-            )
-            # Параметр для линейной проекции в методе forward
-            self.attention_projection = nn.Parameter(
-                torch.ones(self.num_attention_heads, 1)
+                d_model=self.d_model,
+                n_heads=self.num_attention_heads,
+                p_drop=self.attn_dropout
             )
 
         # PReLU поддержка: отдельный слой для каждого скрытого слоя, если activation == 'prelu'
@@ -309,49 +309,48 @@ class CatEmbMLP(nn.Module):
         if len(self.cat_idxs) > 0:
             x_num = []
             x_cat = []
-            cat_i = 0
             for i in range(self.input_dim):
                 if i in self.cat_idxs:
                     x_cat.append(x[:, i].long())
-                    cat_i += 1
                 else:
                     x_num.append(x[:, i].unsqueeze(1))
-            embedded_cats = []
-            for i, cat_values in enumerate(x_cat):
-                embedded_cats.append(self.embeddings[i](cat_values))
-            if embedded_cats:
-                x = torch.cat(x_num + embedded_cats, dim=1)
-            else:
-                x = torch.cat(x_num, dim=1)
+        else:
+            x_num = [x[:, i].unsqueeze(1) for i in range(self.input_dim)]
+            x_cat = []
 
-        # Применяем feature-wise dropout
-        out = self.input_dropout(x)
+        # Объединяем числовые признаки
+        x_num = torch.cat(x_num, dim=1) if x_num else torch.zeros(x.size(0), 0)
+
+        # Преобразуем числовые и категориальные признаки
+        num_vecs = self.num_emb(x_num)
+
+        # Если есть категориальные признаки, обрабатываем их
+        if x_cat:
+            # Используем stack вместо cat для объединения одномерных тензоров
+            x_cat_stacked = torch.stack(x_cat, dim=1)
+            cat_vecs = torch.stack(
+                [emb(x_cat_stacked[:, i]) for i, emb in enumerate(self.cat_emb)], dim=1
+            )
+        else:
+            filler_dim = self.d_model if self.use_self_attention else self.cat_emb_dim
+            cat_vecs = torch.zeros(x.size(0), 0, filler_dim, device=x.device)
+
+        # Применяем feature-wise dropout к векторам признаков
+        num_vecs = self.input_dropout(num_vecs)
+        cat_vecs = self.input_dropout(cat_vecs)
+
+        # Объединяем все признаки
+        feats = torch.cat([num_vecs, cat_vecs], dim=1) if cat_vecs.numel() else num_vecs
 
         # Применяем self-attention, если включено
         if self.use_self_attention:
-            # Преобразуем входные данные, чтобы каждый признак был элементом последовательности
-            # [batch_size, feature_dim] -> [batch_size, feature_dim, 1]
-            batch_size = out.size(0)
-            feature_dim = out.size(1)
+            feats = self.self_attention(feats)
 
-            # Добавляем размерность эмбеддинга для каждого признака
-            attention_input = out.unsqueeze(2)  # [batch_size, feature_dim, 1]
-
-            # Проецируем 1 -> embed_dim, кратное num_attention_heads, используя обучаемую проекцию
-            attention_input = torch.nn.functional.linear(
-                attention_input,
-                self.attention_projection
-            )  # [batch_size, feature_dim, num_attention_heads]
-
-            # Применяем self-attention к последовательности признаков
-            attention_output = self.self_attention(attention_input)  # [batch_size, feature_dim, num_attention_heads]
-
-            # Обратная проекция в одномерное пространство
-            out = attention_output.mean(dim=2)  # [batch_size, feature_dim]
+        # Готовим входные данные для MLP
+        out = feats.flatten(1)
 
         # Передаем через слои MLP
-        for layer in self.layers:
-            out = layer(out)
+        out = self.layers(out)
 
         return out
 

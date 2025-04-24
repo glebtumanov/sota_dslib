@@ -67,11 +67,11 @@ class CEMLPModel(BaseModel):
     def _get_default_hp(self):
         return {
             'cat_emb_dim': 4,
-            'hidden_dims': [64, 32],
-            'activation': 'relu',
-            'dropout': 0.1,
+            'hidden_dims': [256, 128],
+            'activation': 'swish',
+            'dropout': 0.2,
             'feature_dropout': 0.0,  # dropout для входных признаков, диапазон [0.0-0.5]
-            'normalization': 'batch',  # тип нормализации: 'batch', 'layer', 'ghost_batch'
+            'normalization': 'ghost_batch',  # тип нормализации: 'batch', 'layer', 'ghost_batch'
             'virtual_batch_size': 128,  # размер виртуального батча для GhostBatchNorm
             'momentum': 0.9,  # параметр momentum для BatchNorm/GhostBatchNorm
             'initialization': 'he_normal',  # he_normal, he_uniform, xavier_normal, xavier_uniform, uniform, normal, constant, ones, zeros
@@ -81,10 +81,10 @@ class CEMLPModel(BaseModel):
             'min_emb_dim': 2,
             'max_emb_dim': 16,
             'batch_size': 1024,
-            'epochs': 50,
+            'epochs': 200,
             'learning_rate': 0.001,
             'weight_decay': 1e-5,
-            'early_stopping_patience': 5,
+            'early_stopping_patience': 15,
             'scale_numerical': True,
             'scale_method': 'standard',
             'n_bins': 10,
@@ -93,10 +93,12 @@ class CEMLPModel(BaseModel):
             'verbose': True,
             'num_workers': 0,
             'random_state': 42,
-            'lr_scheduler_patience': 10,
-            'lr_scheduler_factor': 0.5,
+            'lr_scheduler_patience': 3,
+            'lr_scheduler_factor': 0.7,
             'use_self_attention': False,  # использовать ли self-attention механизм
             'num_attention_heads': 4,  # количество голов в self-attention
+            'attn_dropout': 0.1,  # вероятность дропаута для attention
+            'd_model': 80,  # размерность эмбеддингов для self-attention
         }
 
     def _get_default_hp_binary(self):

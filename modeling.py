@@ -246,6 +246,9 @@ class SOTAModels:
         elif model_type == 'tabnet':
             from models.tabnet_model import TabNetModel
             model_class = TabNetModel
+        elif model_type == 'cemlp':
+            from models.cemlp_model import CEMLPModel
+            model_class = CEMLPModel
         else:
             raise ValueError(f"Неизвестный тип модели: {model_type}")
 

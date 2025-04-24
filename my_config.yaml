@@ -192,3 +192,5 @@ models:
             random_state: 42 # seed для генерации случайных чисел, любое целое число
             use_self_attention: false # использовать self-attention: true/false
             num_attention_heads: 4 # количество голов внимания при use_self_attention, диапазон [1-16]
+            attn_dropout: 0.1 # вероятность дропаута для attention, диапазон [0.0-0.9]
+            d_model: 80 # размерность эмбеддингов для self-attention, диапазон [1-100]
