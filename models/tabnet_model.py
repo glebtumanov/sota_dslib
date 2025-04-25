@@ -83,37 +83,33 @@ class TabNetModel(BaseModel):
         return {}
 
     def _get_default_hp(self):
-        # Общие гиперпараметры для всех типов задач
+        # Общие гиперпараметры для всех типов задач, обновленные для новой архитектуры
         return {
-            'cat_emb_dim': 4,
-            'n_steps': 6,
-            'n_d': 32,
-            'n_a': 32,
-            'decision_dim': 16,
-            'n_glu_layers': 4,
-            'dropout': 0.2,
-            'gamma': 1.5,
-            'lambda_sparse': 0.0001,
-            'virtual_batch_size': 128,
-            'momentum': 0.9,
-            'batch_size': 1024,
-            'epochs': 200,
-            'learning_rate': 0.001,
-            'early_stopping_patience': 10,
-            'weight_decay': 1e-5,
-            'reducelronplateau_patience': 3,
-            'reducelronplateau_factor': 0.6,
-            'scale_numerical': True,
-            'scale_method': 'standard',
-            'n_bins': 10,
-            'device': None,
-            'output_dim': 1,
-            'verbose': True,
-            'num_workers': 0,
-            'random_state': 42,
-            'dynamic_emb_size': True,
-            'min_emb_dim': 1,
-            'max_emb_dim': 16
+            'd_model': 16,                # Размерность эмбеддингов
+            'n_steps': 4,                 # Количество шагов TabNet
+            'decision_dim': 64,           # Общая размерность выхода FeatureTransformer (Nd+Na), должна быть четной
+            'n_shared': 2,                # Кол-во общих GLU блоков
+            'n_independent': 2,           # Кол-во независимых GLU блоков на шаге
+            'glu_dropout': 0.1,           # Dropout в GLU блоках
+            'dropout_emb': 0.1,           # Dropout после эмбеддингов
+            'glu_norm': 'batch',          # Тип нормализации в GLU ('batch', 'layer', None)
+            'gamma': 1.3,                 # Коэффициент релаксации prior (обычно 1.0-2.0)
+            'lambda_sparse': 1e-4,        # Коэффициент регуляризации разреженности (важен для интерпретируемости)
+            'batch_size': 2048,           # Размер батча
+            'epochs': 150,                # Максимальное количество эпох
+            'learning_rate': 0.01,        # Скорость обучения (может требовать подбора)
+            'early_stopping_patience': 15,# Терпение для ранней остановки
+            'weight_decay': 1e-5,         # L2 регуляризация
+            'reducelronplateau_patience': 5, # Терпение для снижения LR
+            'reducelronplateau_factor': 0.7, # Фактор снижения LR
+            'scale_numerical': True,        # Масштабировать числовые?
+            'scale_method': 'quantile',    # Метод масштабирования (quantile часто устойчивее)
+            'n_bins': 10,                 # Кол-во бинов для 'binning' (если используется)
+            'device': None,               # Устройство cuda/cpu (автоматическое определение)
+            # 'output_dim': 1,            # Определяется задачей (binary=1, multiclass=n_classes, regression=1)
+            'verbose': True,              # Выводить прогресс?
+            'num_workers': 0,             # Кол-во воркеров DataLoader
+            'random_state': 42            # Random state
         }
 
     def _get_default_hp_binary(self):

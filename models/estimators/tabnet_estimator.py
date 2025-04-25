@@ -16,8 +16,8 @@ warnings.filterwarnings('ignore')
 # Импортируем CatEmbDataset из модуля dataset
 from models.dataset import CatEmbDataset
 
-# Импортируем TabNet и другие компоненты из nn.tabnet
-from models.nn.tabnet import TabNet, softmax
+# Импортируем новую реализацию TabNet
+from models.nn.tabnet import TabNet
 
 # Добавляем функцию безопасного сигмоида
 def sigmoid(x):
@@ -28,214 +28,152 @@ def sigmoid(x):
                    1 / (1 + np.exp(-x)),
                    np.exp(x) / (1 + np.exp(x)))
 
+def softmax(x, axis=None):
+    """Вычисление softmax по указанной оси (используется для мультикласса)"""
+    x_max = np.max(x, axis=axis, keepdims=True)
+    exp_x = np.exp(x - x_max)
+    return exp_x / np.sum(exp_x, axis=axis, keepdims=True)
+
 
 class TabNetEstimator(BaseEstimator):
-    """TabNet: Интерпретируемый алгоритм машинного обучения для табличных данных с механизмом внимания.
+    """Обновленный TabNetEstimator на основе новой архитектуры TabNet.
 
-    TabNet - это нейросетевая архитектура, предложенная Google Research в статье
-    "TabNet: Attentive Interpretable Tabular Learning" (https://arxiv.org/pdf/1908.07442v5).
-    Она использует последовательные шаги обработки с механизмом внимания, который
+    Использует последовательные шаги обработки с механизмом внимания, который
     выбирает наиболее важные признаки на каждом шаге обучения.
-
-    Основные преимущества TabNet:
-    - Интерпретируемость: модель показывает, какие признаки важны для принятия решений
-    - Эффективность: достигает высокой производительности на табличных данных
-    - Гибкость: работает как с числовыми, так и с категориальными признаками
-    - Встроенный отбор признаков: модель автоматически выбирает важные признаки
 
     Параметры
     ----------
-    cat_emb_dim : int, default=6
-        Размерность эмбеддингов для категориальных признаков.
-        Рекомендуемый диапазон: [4-10]
+    d_model : int, default=8
+        Размерность эмбеддингов для числовых и категориальных признаков.
 
-    n_steps : int, default=4
-        Количество шагов в архитектуре TabNet (количество слоев принятия решений).
+    n_steps : int, default=3
+        Количество шагов в архитектуре TabNet.
         Рекомендуемый диапазон: [3-10]
 
-    n_d : int, default=8
-        Размерность выхода decision component (Nd).
-        Рекомендуемый диапазон: [8-64]
+    decision_dim : int, default=64
+        Общая размерность выхода FeatureTransformer на каждом шаге (Nd + Na).
+        Должна быть четной.
+        Рекомендуемый диапазон: [16-128]
 
-    n_a : int, default=8
-        Размерность выхода attention component (Na).
-        Рекомендуемый диапазон: [8-64]
+    n_shared : int, default=2
+        Количество общих GLU блоков в FeatureTransformer.
+        Рекомендуемый диапазон: [1-4]
 
-    decision_dim : int, default=8
-        Размерность решающего слоя. Обычно меньше n_d.
-        Рекомендуемый диапазон: [4-64]
+    n_independent : int, default=2
+        Количество независимых GLU блоков в FeatureTransformer на каждом шаге.
+        Рекомендуемый диапазон: [1-4]
 
-    n_glu_layers : int, default=3
-        Количество GLU (Gated Linear Unit) слоев.
-        Рекомендуемый диапазон: [2-4]
+    glu_dropout : float, default=0.0
+        Вероятность дропаута в GLU блоках.
+        Рекомендуемый диапазон: [0.0-0.5]
 
-    dropout : float, default=0.1
-        Вероятность дропаута для регуляризации.
-        Рекомендуемый диапазон: [0.1-0.9]
+    dropout_emb : float, default=0.05
+        Вероятность дропаута после слоя эмбеддингов.
+        Рекомендуемый диапазон: [0.0-0.3]
+
+    glu_norm : str | None, default=None
+        Тип нормализации в GLU блоках ('batch', 'layer' или None).
 
     gamma : float, default=1.5
-        Коэффициент затухания для масок внимания.
+        Коэффициент затухания для масок внимания (prior relaxation).
         Рекомендуемый диапазон: [1.0-2.0]
 
-    lambda_sparse : float, default=0.0001
-        Коэффициент регуляризации разреженности.
-        Рекомендуемый диапазон: [0-0.01]
-
-    virtual_batch_size : int, default=128
-        Размер виртуального батча для Ghost BatchNorm.
-        Рекомендуемый диапазон: [128-4096]
-
-    momentum : float, default=0.9
-        Параметр momentum для BatchNorm.
-        Рекомендуемый диапазон: [0.6-0.98]
+    lambda_sparse : float, default=1e-4
+        Коэффициент регуляризации разреженности (потеря энтропии масок).
+        Рекомендуемый диапазон: [1e-6 - 1e-3]
 
     batch_size : int, default=1024
         Размер батча для обучения.
-        Рекомендуемый диапазон: [256-32768]
 
-    epochs : int, default=50
-        Количество эпох обучения.
-        Рекомендуемый диапазон: [20-100]
+    epochs : int, default=100
+        Максимальное количество эпох обучения.
 
-    learning_rate : float, default=0.005
+    learning_rate : float, default=0.01
         Скорость обучения для оптимизатора Adam.
-        Рекомендуемый диапазон: [0.001-0.025]
 
-    early_stopping_patience : int, default=5
+    early_stopping_patience : int, default=10
         Количество эпох без улучшения до остановки обучения.
 
     weight_decay : float, default=1e-5
         Коэффициент L2-регуляризации для оптимизатора.
 
-    reducelronplateau_patience : int, default=10
-        Количество эпох без улучшения до снижения learning rate для ReduceLROnPlateau.
-        Рекомендуемый диапазон: [5-15]
+    reducelronplateau_patience : int, default=5
+        Количество эпох без улучшения до снижения learning rate.
 
-    reducelronplateau_factor : float, default=0.5
-        Коэффициент снижения learning rate для ReduceLROnPlateau.
-        Рекомендуемый диапазон: [0.1-0.9]
+    reducelronplateau_factor : float, default=0.7
+        Коэффициент снижения learning rate.
 
     scale_numerical : bool, default=True
         Масштабировать ли числовые признаки.
 
     scale_method : str, default="standard"
-        Метод масштабирования числовых признаков:
-        - "standard": StandardScaler (нормализация с нулевым средним и единичной дисперсией)
-        - "minmax": MinMaxScaler (масштабирование в диапазон [0, 1])
-        - "quantile": QuantileTransformer (преобразование к равномерному распределению)
-        - "binning": KBinsDiscretizer (дискретизация на n_bins бинов)
+        Метод масштабирования ("standard", "minmax", "quantile", "binning").
 
     n_bins : int, default=10
-        Количество бинов для метода масштабирования "binning".
+        Количество бинов для "binning".
 
     device : str или torch.device, default=None
         Устройство для обучения (cuda/cpu).
-        Если None, используется CUDA при наличии.
 
     output_dim : int, default=1
-        Размерность выходного слоя.
+        Размерность выходного слоя (переопределяется в дочерних классах).
 
     verbose : bool, default=True
         Вывод прогресса обучения.
 
     num_workers : int, default=0
         Количество worker-процессов для DataLoader.
-        0 означает однопроцессный режим.
 
-    random_state : int, default=None
-        Случайное состояние для воспроизводимости результатов.
-
-    dynamic_emb_size : bool, default=False
-        Использовать ли динамический размер эмбеддингов
-
-    min_emb_dim : int, default=2
-        Минимальный размер эмбеддинга
-
-    max_emb_dim : int, default=16
-        Максимальный размер эмбеддинга
+    random_state : int, default=42
+        Случайное состояние для воспроизводимости.
 
     Примечания
     ----------
-    TabNet поддерживает как числовые, так и категориальные признаки. Категориальные
-    признаки автоматически преобразуются в эмбеддинги заданной размерности.
-
     Модель работает только с данными в формате pandas.DataFrame.
-
-    В модуле представлены три специализированных класса:
+    Категориальные признаки автоматически преобразуются в эмбеддинги.
+    Представлены специализированные классы:
     - TabNetBinary: для бинарной классификации
     - TabNetMulticlass: для многоклассовой классификации
     - TabNetRegressor: для задач регрессии
-
-    Примеры
-    --------
-    >>> from models.nn.tabnet import TabNetBinary
-    >>> # Пример с автоматическим определением категориальных признаков
-    >>> model = TabNetBinary(
-    ...     n_d=32,
-    ...     n_a=32,
-    ...     n_steps=5,
-    ...     dropout=0.3,
-    ...     scale_numerical=True,
-    ...     scale_method="standard"
-    ... )
-    >>> model.fit(X_train, y_train, eval_set=(X_val, y_val), eval_metric='roc_auc')
-    >>> y_pred = model.predict(X_test)
-    >>> y_proba = model.predict_proba(X_test)
-    >>>
-    >>> # Пример с явным указанием категориальных признаков
-    >>> cat_features = ['cat_feature1', 'cat_feature2', 'cat_feature3']
-    >>> model = TabNetBinary(
-    ...     n_d=32,
-    ...     n_a=32,
-    ...     n_steps=5
-    ... )
-    >>> model.fit(X_train, y_train, eval_set=(X_val, y_val), cat_features=cat_features)
-    >>> y_pred = model.predict(X_test, cat_features=cat_features)
-    >>> y_proba = model.predict_proba(X_test, cat_features=cat_features)
     """
 
     def __init__(self,
-                 cat_emb_dim=4,  # Размерность эмбеддингов для категориальных признаков
-                 n_steps=5,  # Количество шагов в TabNet
-                 n_d=64,  # Размерность выхода decision component (Nd)
-                 n_a=64,  # Размерность выхода attention component (Na)
-                 decision_dim=32,  # Размерность решающего слоя
-                 n_glu_layers=2,  # Количество GLU слоев
-                 dropout=0.1,  # Вероятность дропаута
-                 gamma=1.5,  # Коэффициент затухания для масок внимания
-                 lambda_sparse=0.00001,  # Коэффициент регуляризации разреженности
-                 virtual_batch_size=256,  # Размер виртуального батча для Ghost BatchNorm
-                 momentum=0.9,  # Параметр momentum для BatchNorm
-                 batch_size=4096,  # Размер батча для обучения
-                 epochs=100,  # Количество эпох обучения
-                 learning_rate=0.02,  # Скорость обучения
-                 early_stopping_patience=10,  # Количество эпох без улучшения до остановки
-                 weight_decay=1e-5,  # Весовая регуляризация для оптимизатора
-                 reducelronplateau_patience=5,  # Количество эпох без улучшения до снижения learning rate
-                 reducelronplateau_factor=0.7,  # Коэффициент снижения learning rate [0.7-0.9]
-                 scale_numerical=True,  # Масштабировать ли числовые признаки
-                 scale_method="standard",  # Метод масштабирования ("standard", "minmax", "quantile", "binning")
-                 n_bins=10,  # Количество бинов для binning
-                 device=None,  # Устройство для обучения (cuda/cpu)
-                 output_dim=1,  # Размерность выходного слоя
-                 verbose=True,  # Вывод прогресса обучения
-                 num_workers=0,  # Количество worker-процессов для DataLoader (0 - однопроцессный режим)
-                 random_state=42,  # Случайное состояние для воспроизводимости
-                 dynamic_emb_size=False,  # Использовать ли динамический размер эмбеддингов
-                 min_emb_dim=2,  # Минимальный размер эмбеддинга
-                 max_emb_dim=16):  # Максимальный размер эмбеддинга
+                 d_model=8,             # Размерность эмбеддингов
+                 n_steps=3,             # Количество шагов TabNet
+                 decision_dim=64,       # Общая размерность выхода FeatureTransformer (Nd+Na)
+                 n_shared=2,            # Кол-во общих GLU блоков
+                 n_independent=2,       # Кол-во независимых GLU блоков на шаге
+                 glu_dropout=0.0,       # Dropout в GLU
+                 dropout_emb=0.05,      # Dropout после эмбеддингов
+                 glu_norm=None,         # Нормализация в GLU ('batch', 'layer', None)
+                 gamma=1.5,             # Коэффициент релаксации prior
+                 lambda_sparse=1e-4,    # Коэффициент регуляризации разреженности
+                 batch_size=1024,       # Размер батча
+                 epochs=100,            # Количество эпох
+                 learning_rate=0.01,    # Скорость обучения
+                 early_stopping_patience=10, # Терпение для ранней остановки
+                 weight_decay=1e-5,     # L2 регуляризация
+                 reducelronplateau_patience=5, # Терпение для снижения LR
+                 reducelronplateau_factor=0.7, # Фактор снижения LR
+                 scale_numerical=True,  # Масштабировать числовые?
+                 scale_method="standard", # Метод масштабирования
+                 n_bins=10,             # Кол-во бинов для 'binning'
+                 device=None,           # Устройство cuda/cpu
+                 output_dim=1,          # Размерность выхода (задается подклассами)
+                 verbose=True,          # Выводить прогресс?
+                 num_workers=0,         # Кол-во воркеров DataLoader
+                 random_state=42):      # Random state
 
-        self.cat_emb_dim = cat_emb_dim
+        self.d_model = d_model
         self.n_steps = n_steps
-        self.n_d = n_d
-        self.n_a = n_a
         self.decision_dim = decision_dim
-        self.n_glu_layers = n_glu_layers
-        self.dropout = dropout
+        self.n_shared = n_shared
+        self.n_independent = n_independent
+        self.glu_dropout = glu_dropout
+        self.dropout_emb = dropout_emb
+        self.glu_norm = glu_norm
         self.gamma = gamma
         self.lambda_sparse = lambda_sparse
-        self.virtual_batch_size = virtual_batch_size
-        self.momentum = momentum
         self.batch_size = batch_size
         self.epochs = epochs
         self.learning_rate = learning_rate
@@ -251,9 +189,6 @@ class TabNetEstimator(BaseEstimator):
         self.verbose = verbose
         self.num_workers = num_workers
         self.random_state = random_state
-        self.dynamic_emb_size = dynamic_emb_size
-        self.min_emb_dim = min_emb_dim
-        self.max_emb_dim = max_emb_dim
 
         if random_state is not None:
             torch.manual_seed(random_state)
@@ -263,39 +198,27 @@ class TabNetEstimator(BaseEstimator):
         self.cat_idxs = []
         self.cat_dims = []
         self.features = None
+        self.num_continuous = 0 # Будет вычислено в _prepare_data
         self.cat_features = None
         self.is_fitted_ = False
-        self.scaler = None  # Будет содержать обученный скейлер
+        self.scaler = None
 
     def _prepare_data(self, X, y=None, is_train=False, is_multiclass=False, cat_features=None):
-        # Извлекаем признаки
         features = X.columns.tolist()
 
-        # Определяем категориальные признаки
         if cat_features is not None:
-            # Используем указанные категориальные признаки
             cat_features = [f for f in cat_features if f in features]
         else:
-            # Автоматически определяем категориальные признаки по типу данных
             cat_features = []
             for col in features:
                 if X[col].dtype == 'object' or X[col].dtype.name == 'category':
                     cat_features.append(col)
 
-        # Индексы категориальных признаков
         cat_idxs = [features.index(f) for f in cat_features]
+        cat_dims = [int(X[cat_feature].nunique() + 1) for cat_feature in cat_features]
+        num_continuous = len(features) - len(cat_features)
 
-        # Размерности категориальных признаков
-        cat_dims = []
-        for cat_feature in cat_features:
-            # Используем nunique() вместо max()+1 для более точного определения размерности
-            # и добавляем +1 для обработки неизвестных категорий в тестовых данных
-            cat_dim = int(X[cat_feature].nunique() + 1)
-            cat_dims.append(cat_dim)
-
-        # Преобразуем DataFrame в CatEmbDataset
         if y is not None:
-            # Объединяем X и y для создания датасета
             if isinstance(y, pd.Series):
                 y_name = y.name if y.name else 'target'
                 y_df = pd.DataFrame({y_name: y})
@@ -313,8 +236,6 @@ class TabNetEstimator(BaseEstimator):
                 scaler=None if is_train else self.scaler,
                 is_multiclass=is_multiclass
             )
-
-            # Если это тренировочный набор, сохраняем обученный скейлер
             if is_train:
                 self.scaler = dataset.scaler
         else:
@@ -327,33 +248,34 @@ class TabNetEstimator(BaseEstimator):
                 is_multiclass=is_multiclass
             )
 
+        # Сохраняем параметры для инициализации модели
         self.features = features
         self.cat_features = cat_features
         self.cat_idxs = cat_idxs
         self.cat_dims = cat_dims
+        self.num_continuous = num_continuous
 
         return dataset
 
-    def _init_model(self, input_dim):
+    def _init_model(self):
+        # Параметры для TabNetCore из __init__ эстиматора
+        core_kw = {
+            'n_steps': self.n_steps,
+            'decision_dim': self.decision_dim,
+            'n_shared': self.n_shared,
+            'n_independent': self.n_independent,
+            'glu_dropout': self.glu_dropout,
+            'norm': self.glu_norm,
+            'gamma': self.gamma
+        }
         return TabNet(
-            input_dim=input_dim,
-            cat_idxs=self.cat_idxs,
+            num_continuous=self.num_continuous,
             cat_dims=self.cat_dims,
-            cat_emb_dim=self.cat_emb_dim,
-            n_steps=self.n_steps,
-            n_d=self.n_d,
-            n_a=self.n_a,
-            decision_dim=self.decision_dim,
-            n_glu_layers=self.n_glu_layers,
-            dropout=self.dropout,
-            gamma=self.gamma,
-            lambda_sparse=self.lambda_sparse,
-            virtual_batch_size=self.virtual_batch_size,
-            momentum=self.momentum,
+            cat_idx=self.cat_idxs,
+            d_model=self.d_model,
             output_dim=self.output_dim,
-            dynamic_emb_size=self.dynamic_emb_size,
-            min_emb_dim=self.min_emb_dim,
-            max_emb_dim=self.max_emb_dim
+            dropout_emb=self.dropout_emb,
+            **core_kw
         )
 
     def _train_epoch(self, model, loader, optimizer, criterion, scheduler=None, pbar=True):
@@ -367,32 +289,25 @@ class TabNetEstimator(BaseEstimator):
 
             optimizer.zero_grad()
 
-            # Получаем выходы и маски для регуляризации
-            outputs, masks = model(x, return_masks=True)
+            # Модель теперь возвращает (outputs, sparse_loss)
+            outputs, sparse_loss = model(x)
 
             # Вычисляем основную функцию потерь
             main_loss = criterion(outputs, y)
 
-            # Вычисляем регуляризацию разреженности
-            sparse_loss = model.calculate_sparse_loss(masks)
-
-            # Суммарная функция потерь
-            loss = main_loss + sparse_loss
+            # Суммарная функция потерь с регуляризацией разреженности
+            loss = main_loss + self.lambda_sparse * sparse_loss
 
             loss.backward()
-
-            # Добавляем градиентное клиппирование для стабильности
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
             optimizer.step()
-            if scheduler:
-                scheduler.step()
+            if scheduler: # Step per batch if using OneCycleLR or similar
+                 pass # scheduler.step()
 
-            total_loss += loss.item()
-            all_outputs.append(outputs.detach().cpu())
+            total_loss += loss.item() # Используем суммарную потерю для отслеживания
+            all_outputs.append(outputs.detach().cpu()) # Сохраняем только логиты
             all_targets.append(y.cpu())
 
-        # Собираем все предсказания и цели
         all_outputs = torch.cat(all_outputs).numpy()
         all_targets = torch.cat(all_targets).numpy()
 
@@ -400,7 +315,7 @@ class TabNetEstimator(BaseEstimator):
 
     def _validate_epoch(self, model, loader, criterion, pbar=True):
         model.eval()
-        total_loss = 0
+        total_loss = 0 # Отслеживаем только основную потерю для валидации
         all_outputs = []
         all_targets = []
 
@@ -408,15 +323,14 @@ class TabNetEstimator(BaseEstimator):
             for x, y in tqdm(loader, desc="Validation", leave=False, disable=not (self.verbose and pbar)):
                 x, y = x.to(self.device), y.to(self.device)
 
-                # Получаем только выходы без регуляризации разреженности при валидации
-                outputs, _ = model(x, return_masks=True)
+                # Получаем выходы, игнорируем sparse_loss для валидации
+                outputs, _ = model(x)
                 loss = criterion(outputs, y)
 
                 total_loss += loss.item()
                 all_outputs.append(outputs.cpu())
                 all_targets.append(y.cpu())
 
-        # Собираем все предсказания и цели
         all_outputs = torch.cat(all_outputs).numpy()
         all_targets = torch.cat(all_targets).numpy()
 
@@ -429,51 +343,48 @@ class TabNetEstimator(BaseEstimator):
         with torch.no_grad():
             for x in tqdm(loader, desc="Predicting", leave=False, disable=not (self.verbose and pbar)):
                 if isinstance(x, tuple):
-                    x = x[0]  # Если dataset возвращает tuple, берем только данные
+                    x = x[0]
                 x = x.to(self.device)
-                outputs = model(x)
+                # Получаем только логиты для предсказаний
+                outputs, _ = model(x)
                 all_outputs.append(outputs.cpu().numpy())
 
         return np.concatenate(all_outputs)
 
     def _calculate_metric(self, y_true, y_pred, metric):
+        # Логика расчета метрик остается прежней
         if metric == 'roc_auc':
-            # Для бинарной классификации
             if self.output_dim == 1:
                 y_pred_proba = sigmoid(y_pred)
                 return roc_auc_score(y_true, y_pred_proba)
-            # Для многоклассовой (не поддерживается напрямую)
             else:
-                raise ValueError("roc_auc не поддерживается для многоклассовой классификации без дополнительных параметров")
+                 # Для многоклассовой классификации используем вероятности softmax
+                 # y_pred здесь уже содержит логиты
+                 y_pred_proba = softmax(y_pred, axis=1)
+                 try:
+                     # OvR стратегия
+                     return roc_auc_score(y_true, y_pred_proba, multi_class='ovr')
+                 except ValueError as e:
+                      print(f"Предупреждение при вычислении ROC AUC (multi-class): {e}")
+                      # Если есть только один класс в y_true, roc_auc_score падает
+                      return 0.0 # Возвращаем 0 или другое значение по умолчанию
 
         elif metric == 'accuracy':
-            # Для бинарной классификации
             if self.output_dim == 1:
-                y_pred_class = (y_pred > 0).astype(int)
+                y_pred_class = (y_pred > 0).astype(int) # Используем 0 как порог для логитов
                 return accuracy_score(y_true, y_pred_class)
-            # Для многоклассовой
             else:
                 y_pred_class = np.argmax(y_pred, axis=1)
-                return accuracy_score(y_true.squeeze(), y_pred_class)
+                # Убедимся, что y_true одномерный
+                if y_true.ndim > 1 and y_true.shape[1] == 1:
+                     y_true = y_true.squeeze()
+                return accuracy_score(y_true, y_pred_class)
 
-        elif metric == 'mse':
-            # Для регрессии
-            return mean_squared_error(y_true, y_pred)
-
-        elif metric == 'mae':
-            # Для регрессии
-            return mean_absolute_error(y_true, y_pred)
-
-        elif metric == 'rmse':
-            # Для регрессии
-            return np.sqrt(mean_squared_error(y_true, y_pred))
-
-        elif metric == 'r2':
-            # Для регрессии
-            return r2_score(y_true, y_pred)
-
-        else:
-            raise ValueError(f"Неподдерживаемая метрика: {metric}")
+        elif metric == 'mse': return mean_squared_error(y_true, y_pred)
+        elif metric == 'mae': return mean_absolute_error(y_true, y_pred)
+        elif metric == 'rmse': return np.sqrt(mean_squared_error(y_true, y_pred))
+        elif metric == 'r2': return r2_score(y_true, y_pred)
+        else: raise ValueError(f"Неподдерживаемая метрика: {metric}")
 
     def _get_criterion(self):
         raise NotImplementedError("Метод должен быть переопределен в дочернем классе")
@@ -495,225 +406,172 @@ class TabNetEstimator(BaseEstimator):
             raise ValueError("Модель не обучена. Сначала выполните метод 'fit'.")
 
     def fit(self, X, y, eval_set=None, eval_metric=None, mode=None, cat_features=None, pbar=True):
-        """Обучение модели TabNet
+        """Обучение модели TabNet.
 
         Параметры:
         -----------
         X : pandas.DataFrame
-            Входные признаки размерности (n_samples, n_features)
-        y : pandas.Series или list
-            Целевые значения размерности (n_samples,)
+            Входные признаки.
+        y : pandas.Series или list/numpy.ndarray
+            Целевые значения.
         eval_set : tuple, optional (default=None)
-            Кортеж (X_val, y_val) с валидационными данными для мониторинга во время обучения
+            Кортеж (X_val, y_val) для валидации.
         eval_metric : str, optional (default=None)
-            Метрика для мониторинга на валидации. Поддерживаемые значения:
-            - 'roc_auc': AUC ROC (для бинарной классификации)
-            - 'accuracy': точность (для классификации)
-            - 'mse': среднеквадратичная ошибка (для регрессии)
-            - 'mae': средняя абсолютная ошибка (для регрессии)
-            - 'rmse': корень из среднеквадратичной ошибки (для регрессии)
-            - 'r2': коэффициент детерминации (для регрессии)
-            Если None, используется метрика по умолчанию для данного типа задачи
+            Метрика для мониторинга.
         mode : str, optional (default=None)
-            Режим оптимизации метрики:
-            - 'max': чем больше, тем лучше (для accuracy, auc, r2)
-            - 'min': чем меньше, тем лучше (для loss, mse, rmse)
-            Если None, определяется на основе метрики
+            Режим оптимизации ('max' или 'min').
         cat_features : list, optional (default=None)
-            Список имен категориальных признаков. Если указан, используются эти признаки.
-            Если None, категориальные признаки определяются автоматически по типу данных.
+            Список имен категориальных признаков. Если None, определяются автоматически.
         pbar : bool, optional (default=True)
-            Отображать ли прогресс-бар при verbose=True
+            Отображать прогресс-бар.
 
         Возвращает:
         -----------
         self : объект
-            Обученная модель
+            Обученная модель.
         """
-        # Определяем метрику и режим оптимизации
         eval_metric = eval_metric or self._get_default_eval_metric()
         mode = mode or self._get_default_metric_mode()
 
         if mode not in ['max', 'min']:
             raise ValueError("Параметр mode должен быть 'max' или 'min'")
 
-        # Подготавливаем данные
-        train_dataset = self._prepare_data(X, y, is_train=True, cat_features=cat_features)
+        # Подготовка данных (вычисляет self.num_continuous, self.cat_dims, self.cat_idxs)
+        train_dataset = self._prepare_data(X, y, is_train=True, cat_features=cat_features, is_multiclass=isinstance(self, TabNetMulticlass))
 
         val_dataset = None
         if eval_set is not None:
             X_val, y_val = eval_set
-            val_dataset = self._prepare_data(X_val, y_val, is_train=False, cat_features=cat_features)
+            val_dataset = self._prepare_data(X_val, y_val, is_train=False, cat_features=self.cat_features, is_multiclass=isinstance(self, TabNetMulticlass))
 
-        # Создаем DataLoader для обучения
         train_loader = DataLoader(
-            train_dataset,
-            batch_size=self.batch_size,
-            shuffle=True,
+            train_dataset, batch_size=self.batch_size, shuffle=True,
             num_workers=self.num_workers,
-            persistent_workers=False if self.num_workers == 0 else True,
-            pin_memory=True
+            persistent_workers=(self.num_workers > 0), pin_memory=True
         )
 
         val_loader = None
         if val_dataset is not None:
             val_loader = DataLoader(
-                val_dataset,
-                batch_size=self.batch_size,
-                shuffle=False,
+                val_dataset, batch_size=self.batch_size, shuffle=False,
                 num_workers=self.num_workers,
-                persistent_workers=False if self.num_workers == 0 else True,
-                pin_memory=True
+                persistent_workers=(self.num_workers > 0), pin_memory=True
             )
 
-        # Инициализируем модель, если еще не инициализирована
+        # Инициализируем модель здесь, после _prepare_data
         if self.model is None:
-            self.model = self._init_model(len(self.features))
+            self.model = self._init_model()
             self.model.to(self.device)
 
-        # Настраиваем оптимизатор и функцию потерь
         optimizer = torch.optim.Adam(
-            self.model.parameters(),
-            lr=self.learning_rate,
-            weight_decay=self.weight_decay
+            self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay
         )
-
         criterion = self._get_criterion()
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 'min', patience=self.reducelronplateau_patience, factor=self.reducelronplateau_factor
+            optimizer, mode='min' if mode == 'min' else 'max', # Режим зависит от метрики потерь валидации
+            patience=self.reducelronplateau_patience,
+            factor=self.reducelronplateau_factor,
+            verbose=self.verbose
         )
 
-        # Переменные для отслеживания лучшей модели
-        best_metric = float('inf') if mode == 'min' else float('-inf')
+        best_metric_val = float('inf') if mode == 'min' else float('-inf')
         no_improvement_epochs = 0
         best_model_state = None
 
         if self.verbose:
             print(f"Начинаем обучение на {self.device}...")
+            # print(f"Параметры модели: {self.model}")
 
-        # Цикл обучения
         for epoch in range(self.epochs):
-            # Обучение
             train_loss, train_outputs, train_targets = self._train_epoch(
-                self.model, train_loader, optimizer, criterion, scheduler=None, pbar=pbar
+                self.model, train_loader, optimizer, criterion, pbar=pbar
             )
+            train_metric = self._calculate_metric(train_targets, train_outputs, eval_metric)
 
-            # Освобождаем память
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             gc.collect()
 
-            # Вычисляем метрику на обучающем наборе
-            train_metric = self._calculate_metric(train_targets, train_outputs, eval_metric)
-
-            # Валидация
             val_loss, val_metric = None, None
+            current_metric_val = -1 # Значение по умолчанию, если нет валидации
+
             if val_loader is not None:
                 val_loss, val_outputs, val_targets = self._validate_epoch(self.model, val_loader, criterion, pbar=pbar)
                 val_metric = self._calculate_metric(val_targets, val_outputs, eval_metric)
-                current_metric = val_metric
-                scheduler.step(val_loss)
+                current_metric_val = val_metric # Используем метрику на валидации для early stopping
+                scheduler.step(val_loss) # Снижаем LR по val_loss
             else:
-                current_metric = train_metric
-                scheduler.step(train_loss)
+                current_metric_val = train_metric # Используем метрику на трейне для early stopping
+                scheduler.step(train_loss) # Снижаем LR по train_loss
 
-            # Выводим информацию о прогрессе
             if self.verbose:
-                print(f"Epoch {epoch + 1}/{self.epochs}, "
-                      f"Train loss: {train_loss:.4f}, Train {eval_metric}: {train_metric:.4f}"
-                      + (f", Val loss: {val_loss:.4f}, Val {eval_metric}: {val_metric:.4f}" if val_loader else ""))
+                log_msg = (f"Epoch {epoch + 1}/{self.epochs}, "
+                           f"Train loss: {train_loss:.4f}, Train {eval_metric}: {train_metric:.4f}")
+                if val_loader is not None:
+                    log_msg += f", Val loss: {val_loss:.4f}, Val {eval_metric}: {val_metric:.4f}"
+                print(log_msg)
 
-            # Проверяем улучшение метрик
-            improved = (mode == 'max' and current_metric > best_metric) or (mode == 'min' and current_metric < best_metric)
+            improved = (mode == 'max' and current_metric_val > best_metric_val) or \
+                       (mode == 'min' and current_metric_val < best_metric_val)
 
             if improved:
-                best_metric = current_metric
+                best_metric_val = current_metric_val
                 no_improvement_epochs = 0
                 best_model_state = copy.deepcopy(self.model.state_dict())
                 if self.verbose:
-                    print(f"Сохраняем лучшую модель с метрикой {eval_metric}: {best_metric:.4f}")
+                    print(f"---> Сохранена лучшая модель (Эпоха {epoch + 1}) с Val {eval_metric}: {best_metric_val:.4f}")
             else:
                 no_improvement_epochs += 1
-                if self.verbose and no_improvement_epochs >= self.early_stopping_patience:
-                    print(f"Останавливаем обучение из-за отсутствия улучшений в течение {no_improvement_epochs} эпох")
+                if self.verbose:
+                    print(f"Нет улучшения {no_improvement_epochs}/{self.early_stopping_patience} эпох.")
+                if no_improvement_epochs >= self.early_stopping_patience:
+                    if self.verbose:
+                        print(f"Ранняя остановка на эпохе {epoch + 1}.")
                     break
-                elif self.verbose:
-                    print(f"Нет улучшения в течение {no_improvement_epochs} эпох")
 
-        # Закрываем DataLoader перед загрузкой новой модели
         del train_loader
         if val_loader is not None:
             del val_loader
         gc.collect()
 
-        # Загружаем лучшую модель
         if best_model_state:
-            for param_tensor in best_model_state:
-                best_model_state[param_tensor] = best_model_state[param_tensor].to(self.device)
+            # Перемещаем state_dict на нужное устройство перед загрузкой
+            # for key in best_model_state:
+            #     best_model_state[key] = best_model_state[key].to(self.device)
             self.model.load_state_dict(best_model_state)
             if self.verbose:
-                print("Загружена лучшая модель")
+                print(f"Загружена лучшая модель с Val {eval_metric}: {best_metric_val:.4f}")
+        elif self.verbose:
+             print("Обучение завершено без сохранения лучшей модели (возможно, не было валидации или улучшений).")
+
 
         self.is_fitted_ = True
         return self
 
     def predict(self, X, cat_features=None, pbar=True):
-        """Предсказание целевых значений
-
-        Параметры:
-        -----------
-        X : pandas.DataFrame
-            Входные признаки размерности (n_samples, n_features)
-        cat_features : list, optional (default=None)
-            Список имен категориальных признаков. Если указан, используются эти признаки.
-            Если None, используются категориальные признаки, определенные при обучении.
-            Если ни один вариант не доступен, признаки определяются автоматически.
-        pbar : bool, optional (default=True)
-            Отображать ли прогресс-бар при verbose=True
-
-        Возвращает:
-        -----------
-        y_pred : numpy.ndarray
-            Предсказанные значения размерности (n_samples,)
-        """
         self._check_is_fitted()
-
-        # Если cat_features не указан, используем сохраненный при обучении
-        if cat_features is None and hasattr(self, 'cat_features'):
+        if cat_features is None:
             cat_features = self.cat_features
 
-        # Подготавливаем данные и создаем DataLoader
-        test_dataset = self._prepare_data(X, is_train=False, cat_features=cat_features)
+        test_dataset = self._prepare_data(X, is_train=False, cat_features=cat_features, is_multiclass=isinstance(self, TabNetMulticlass))
         test_loader = DataLoader(
-            test_dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
+            test_dataset, batch_size=self.batch_size, shuffle=False,
             num_workers=self.num_workers,
-            persistent_workers=False if self.num_workers == 0 else True,
-            pin_memory=True
+            persistent_workers=(self.num_workers > 0), pin_memory=True
         )
 
-        # Получаем и преобразуем предсказания
         raw_predictions = self._get_predictions(self.model, test_loader, pbar=pbar)
-
-        # Очищаем память
         del test_loader
         gc.collect()
-
         return self._transform_predictions(raw_predictions)
 
 
+# ==========================================================================
+# Подклассы для конкретных задач
+# ==========================================================================
+
 class TabNetBinary(TabNetEstimator):
-    """TabNet для бинарной классификации.
-
-    Реализация TabNet для задач бинарной классификации.
-    Подробности о параметрах см. в документации базового класса TabNetEstimator.
-
-    Дополнительные методы:
-    ----------------------
-    predict_proba(X) : возвращает вероятности классов
-    """
-
+    """TabNet для бинарной классификации."""
     def __init__(self, **kwargs):
         super().__init__(output_dim=1, **kwargs)
 
@@ -727,91 +585,53 @@ class TabNetBinary(TabNetEstimator):
         return 'max'
 
     def _evaluate_metrics(self, y_true, y_pred):
-        # Преобразуем логиты в вероятности
         y_pred_proba = sigmoid(y_pred)
         return roc_auc_score(y_true, y_pred_proba)
 
     def _transform_predictions(self, raw_predictions):
-        # Преобразуем логиты в вероятности
         probabilities = sigmoid(raw_predictions)
-        # Преобразуем вероятности в классы 0/1
         return (probabilities > 0.5).astype(int).squeeze()
 
     def predict_proba(self, X, cat_features=None, pbar=True):
-        """Предсказание вероятностей классов
-
-        Параметры:
-        -----------
-        X : pandas.DataFrame
-            Входные признаки размерности (n_samples, n_features)
-        cat_features : list, optional (default=None)
-            Список имен категориальных признаков. Если указан, используются эти признаки.
-            Если None, используются категориальные признаки, определенные при обучении.
-            Если ни один вариант не доступен, признаки определяются автоматически.
-        pbar : bool, optional (default=True)
-            Отображать ли прогресс-бар при verbose=True
-
-        Возвращает:
-        -----------
-        y_proba : numpy.ndarray
-            Вероятности классов размерности (n_samples, 2)
-        """
+        """Предсказание вероятностей классов [P(0), P(1)]."""
         self._check_is_fitted()
-
-        # Если cat_features не указан, используем сохраненный при обучении
-        if cat_features is None and hasattr(self, 'cat_features'):
+        if cat_features is None:
             cat_features = self.cat_features
 
-        # Подготавливаем данные и создаем DataLoader
-        test_dataset = self._prepare_data(X, is_train=False, cat_features=cat_features)
+        test_dataset = self._prepare_data(X, is_train=False, cat_features=cat_features, is_multiclass=False)
         test_loader = DataLoader(
-            test_dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
+            test_dataset, batch_size=self.batch_size, shuffle=False,
             num_workers=self.num_workers,
-            persistent_workers=False if self.num_workers == 0 else True,
-            pin_memory=True
+            persistent_workers=(self.num_workers > 0), pin_memory=True
         )
 
-        # Получаем предсказания
         raw_predictions = self._get_predictions(self.model, test_loader, pbar=pbar)
-
-        # Очищаем память
         del test_loader
         gc.collect()
 
-        # Преобразуем логиты в вероятности, используя безопасную сигмоиду
         proba_1 = sigmoid(raw_predictions).squeeze()
-        proba_0 = 1 - proba_1
+        # Убедимся, что proba_1 всегда является массивом
+        if isinstance(proba_1, (float, int)):
+             proba_1 = np.array([proba_1])
+        elif proba_1.ndim == 0: # Если это скалярный тензор numpy
+             proba_1 = proba_1.reshape(1)
 
+        proba_0 = 1 - proba_1
         return np.column_stack((proba_0, proba_1))
 
 
 class TabNetMulticlass(TabNetEstimator):
-    """TabNet для многоклассовой классификации.
-
-    Реализация TabNet для задач многоклассовой классификации.
-    Подробности о параметрах см. в документации базового класса TabNetEstimator.
-
-    Дополнительные параметры:
-    -------------------------
-    n_classes : int, обязательный
-        Количество классов для многоклассовой классификации
-
-    Дополнительные методы:
-    ----------------------
-    predict_proba(X) : возвращает вероятности для всех классов
-    """
-
+    """TabNet для многоклассовой классификации."""
     def __init__(self, n_classes=None, **kwargs):
         if n_classes is None:
-            raise ValueError("Для многоклассовой классификации необходимо указать параметр 'n_classes'")
+            raise ValueError("Для многоклассовой классификации необходимо указать 'n_classes'")
         self.n_classes = n_classes
         super().__init__(output_dim=n_classes, **kwargs)
         self.label_encoder = LabelEncoder()
 
     def _prepare_data(self, X, y=None, is_train=False, cat_features=None):
-        return super()._prepare_data(X, y, is_train, is_multiclass=True, cat_features=cat_features)
+        # Используем is_multiclass=True для CatEmbDataset
+        return super()._prepare_data(X, y, is_train=is_train, is_multiclass=True, cat_features=cat_features)
 
     def _get_criterion(self):
         return torch.nn.CrossEntropyLoss()
@@ -823,89 +643,67 @@ class TabNetMulticlass(TabNetEstimator):
         return 'max'
 
     def _evaluate_metrics(self, y_true, y_pred):
-        # Преобразуем логиты в классы
         predicted_classes = np.argmax(y_pred, axis=1)
         true_classes = y_true.squeeze()
-        accuracy = np.mean(predicted_classes == true_classes)
-        return accuracy
+        return accuracy_score(true_classes, predicted_classes)
 
     def _transform_predictions(self, raw_predictions):
-        # Находим класс с максимальной вероятностью
         predicted_classes = np.argmax(raw_predictions, axis=1)
-
-        # Если была выполнена кодировка меток, декодируем их обратно
-        if hasattr(self, 'label_encoder') and hasattr(self.label_encoder, 'classes_'):
-            return self.label_encoder.inverse_transform(predicted_classes)
-
-        return predicted_classes
+        # Декодируем метки, если энкодер обучен
+        if hasattr(self.label_encoder, 'classes_') and self.label_encoder.classes_ is not None:
+             # Проверка на случай, если fit не был вызван
+             try:
+                 return self.label_encoder.inverse_transform(predicted_classes)
+             except ValueError:
+                  # Если классы не найдены (например, predict вызван до fit)
+                  return predicted_classes
+        else:
+             return predicted_classes
 
     def fit(self, X, y, eval_set=None, eval_metric=None, mode=None, cat_features=None, pbar=True):
-        """Обучение модели с предварительной кодировкой меток классов"""
-        # Кодируем метки классов
+        """Обучение модели с кодировкой меток классов."""
+        # Кодируем y перед передачей в базовый fit
         encoded_y = self.label_encoder.fit_transform(y)
+        self.n_classes = len(self.label_encoder.classes_)
+        self.output_dim = self.n_classes # Обновляем output_dim на случай, если n_classes изменился
 
-        # Подготавливаем валидационные данные, если они предоставлены
+        encoded_eval_set = None
         if eval_set is not None:
             X_val, y_val = eval_set
-            encoded_y_val = self.label_encoder.transform(y_val)
-            eval_set = (X_val, encoded_y_val)
+            # Используем transform, а не fit_transform для валидационных меток
+            try:
+                 encoded_y_val = self.label_encoder.transform(y_val)
+                 encoded_eval_set = (X_val, encoded_y_val)
+            except ValueError as e:
+                 print(f"Предупреждение: Не удалось преобразовать метки валидации: {e}. Валидация будет пропущена.")
+                 encoded_eval_set = None # Пропускаем валидацию, если метки не совпадают
 
-        # Обучаем модель с закодированными метками
-        return super().fit(X, encoded_y, eval_set=eval_set, eval_metric=eval_metric, mode=mode, cat_features=cat_features, pbar=pbar)
+        # Вызываем fit базового класса с закодированными метками
+        return super().fit(X, encoded_y, eval_set=encoded_eval_set, eval_metric=eval_metric, mode=mode, cat_features=cat_features, pbar=pbar)
 
     def predict_proba(self, X, cat_features=None, pbar=True):
-        """Предсказание вероятностей классов
-
-        Параметры:
-        -----------
-        X : pandas.DataFrame
-            Входные признаки размерности (n_samples, n_features)
-        cat_features : list, optional (default=None)
-            Список имен категориальных признаков. Если указан, используются эти признаки.
-            Если None, используются категориальные признаки, определенные при обучении.
-            Если ни один вариант не доступен, признаки определяются автоматически.
-        pbar : bool, optional (default=True)
-            Отображать ли прогресс-бар при verbose=True
-
-        Возвращает:
-        -----------
-        y_proba : numpy.ndarray
-            Вероятности классов размерности (n_samples, n_classes)
-        """
+        """Предсказание вероятностей для всех классов."""
         self._check_is_fitted()
-
-        # Если cat_features не указан, используем сохраненный при обучении
-        if cat_features is None and hasattr(self, 'cat_features'):
+        if cat_features is None:
             cat_features = self.cat_features
 
-        # Подготавливаем данные и создаем DataLoader
-        test_dataset = self._prepare_data(X, is_train=False, cat_features=cat_features)
+        test_dataset = self._prepare_data(X, is_train=False, cat_features=cat_features, is_multiclass=True)
         test_loader = DataLoader(
-            test_dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
+            test_dataset, batch_size=self.batch_size, shuffle=False,
             num_workers=self.num_workers,
-            persistent_workers=False if self.num_workers == 0 else True,
-            pin_memory=True
+            persistent_workers=(self.num_workers > 0), pin_memory=True
         )
 
-        # Получаем предсказания
         raw_predictions = self._get_predictions(self.model, test_loader, pbar=pbar)
-
-        # Очищаем память
         del test_loader
         gc.collect()
 
-        # Применяем softmax для получения вероятностей
+        # Применяем softmax к логитам
         return softmax(raw_predictions, axis=1)
 
+
 class TabNetRegressor(TabNetEstimator):
-    """TabNet для регрессии.
-
-    Реализация TabNet для задач регрессии.
-    Подробности о параметрах см. в документации базового класса TabNetEstimator.
-    """
-
+    """TabNet для регрессии."""
     def __init__(self, **kwargs):
         super().__init__(output_dim=1, **kwargs)
 
@@ -913,13 +711,15 @@ class TabNetRegressor(TabNetEstimator):
         return torch.nn.MSELoss()
 
     def _get_default_eval_metric(self):
-        return 'mse'
+        return 'mae' # Часто MAE более интерпретируема, чем MSE/RMSE
 
     def _get_default_metric_mode(self):
         return 'min'
 
     def _evaluate_metrics(self, y_true, y_pred):
-        return np.mean((y_true - y_pred) ** 2)
+        # По умолчанию возвращаем MAE для оценки
+        return mean_absolute_error(y_true, y_pred)
 
     def _transform_predictions(self, raw_predictions):
+        # Выход модели - это уже предсказанные значения
         return raw_predictions.squeeze()

@@ -174,6 +174,11 @@ class CatEmbDataset(Dataset):
         self.scaler = scaler
         num_features = [f for f in features if f not in cat_features]
 
+        # Шаг 1: Заполняем пропуски и бесконечности *перед* масштабированием
+        if num_features:
+            df_copy[num_features] = df_copy[num_features].fillna(0).replace([np.inf, -np.inf], 0)
+
+        # Шаг 2: Масштабируем числовые признаки, если включено
         if self.scale_numerical and num_features:
             if self.scaler is None:
                 # Создаем и обучаем новый скейлер
@@ -181,16 +186,7 @@ class CatEmbDataset(Dataset):
                 self.scaler.fit(df_copy[num_features])
 
             # Применяем скейлер
-            if scale_method == "binning":
-                # Для KBinsDiscretizer преобразуем данные и заменяем в DataFrame
-                df_copy[num_features] = self.scaler.transform(df_copy[num_features])
-            else:
-                # Для остальных скейлеров
-                df_copy[num_features] = self.scaler.transform(df_copy[num_features])
-        else:
-            # Если масштабирование отключено, просто заменяем nan и inf значения на 0
-            if num_features:
-                df_copy[num_features] = df_copy[num_features].fillna(0).replace([float('inf'), -float('inf')], 0)
+            df_copy[num_features] = self.scaler.transform(df_copy[num_features])
 
         # Конвертируем данные в тензоры
         self.data = torch.tensor(df_copy[features].values, dtype=torch.float32)

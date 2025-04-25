@@ -1,303 +1,413 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-import math
+from __future__ import annotations
+import math, torch, torch.nn as nn, torch.nn.functional as F
+from typing import Sequence, List, Optional, Union
 
 
-def sparsemax(x, dim=-1):
-    """Реализация функции Sparsemax."""
-    original_shape = x.shape
-
-    # Перемещаем целевое измерение в конец для удобства
-    if dim != -1:
-        x = x.transpose(dim, -1)
-
-    # Сглаживаем все измерения кроме последнего
-    x_flat = x.reshape(-1, x.size(-1))
-    dim = -1
-
-    # Сортируем и вычисляем кумулятивную сумму
-    sorted_x, _ = torch.sort(x_flat, dim=dim, descending=True)
-    cumsum = torch.cumsum(sorted_x, dim=dim)
-
-    # Создаем индексы и находим k (макс. индекс, удовлетворяющий условию)
-    D = x_flat.size(dim)
-    range_indices = torch.arange(1, D + 1, dtype=x.dtype, device=x.device).unsqueeze(0).expand_as(x_flat)
-    condition = 1 + range_indices * sorted_x > cumsum
-    k = torch.sum(condition.to(dtype=torch.int32), dim=dim, keepdim=True)
-
-    # Вычисляем порог tau и результат
-    tau = (cumsum.gather(dim, k - 1) - 1) / k
-    result = torch.clamp(x_flat - tau, min=0)
-
-    # Возвращаем к исходной форме
-    if dim != -1:
-        result = result.reshape(original_shape).transpose(dim, -1)
-    else:
-        result = result.reshape(original_shape)
-
-    return result
-
-
-class GhostBatchNorm(nn.Module):
-    """Реализация Ghost Batch Normalization для TabNet."""
-    def __init__(self, input_dim, virtual_batch_size=128, momentum=0.9):
-        super().__init__()
-        self.input_dim = input_dim
-        self.virtual_batch_size = virtual_batch_size
-        self.bn = nn.BatchNorm1d(input_dim, momentum=momentum)
-
-    def forward(self, x):
-        if self.training and x.size(0) > self.virtual_batch_size:
-            # Разбиваем батч на виртуальные подбатчи
-            chunks = x.chunk(max(1, x.size(0) // self.virtual_batch_size), 0)
-            # Применяем BatchNorm к каждому подбатчу
-            res = torch.cat([self.bn(x_) for x_ in chunks], dim=0)
-        else:
-            # В режиме оценки или для маленьких батчей используем обычную BatchNorm
-            res = self.bn(x)
-        return res
-
-
+# --------------------------------------------------------------------------
+# 1.  GLU-блок
+# --------------------------------------------------------------------------
 class GLUBlock(nn.Module):
-    """Блок GLU (Gated Linear Unit) с Ghost Batch нормализацией и активацией."""
-    def __init__(self, input_dim, output_dim, virtual_batch_size=128, momentum=0.9):
+    """Linear → (опц.) Norm → GLU → Dropout."""
+    def __init__(self,
+                 in_features: int,
+                 out_features: int | None = None,
+                 norm: str | None = None,          # <= по умолчанию нет нормализации
+                 p_dropout: float = 0.0,
+                 dim: int = -1):
         super().__init__()
-        self.fc = nn.Linear(input_dim, output_dim * 2)
-        self.norm = GhostBatchNorm(output_dim * 2, virtual_batch_size, momentum)
+        out_features = out_features or in_features
+        if norm == "batch":
+            # Используем BatchNorm1d с настройками по умолчанию
+            self.norm = nn.BatchNorm1d(in_features)
+        elif norm == "layer":
+            self.norm = nn.LayerNorm(in_features)
+        else:                                       # None
+            self.norm = nn.Identity()
 
-    def forward(self, x):
-        x = self.fc(x)
+        self.fc   = nn.Linear(in_features, out_features * 2)
+        self.dim  = dim
+        self.drop = nn.Dropout(p_dropout)
 
-        # Приводим размерность для BatchNorm1d если необходимо
-        shape = x.shape
-        if len(shape) > 2:
-            x = self.norm(x.view(-1, shape[-1])).view(shape)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Обработка BatchNorm1d для 3D тензоров (B, SeqLen, Features)
+        if isinstance(self.norm, nn.BatchNorm1d) and x.ndim == 3:
+             # BatchNorm1d ожидает (B, C, L), поэтому транспонируем
+            x = self.norm(x.transpose(1, 2)).transpose(1, 2)
         else:
+            # LayerNorm и Identity работают с (B, ..., Features)
             x = self.norm(x)
+        return self.drop(F.glu(self.fc(x), dim=self.dim))
 
-        return F.glu(x, dim=-1)
 
-
+# --------------------------------------------------------------------------
+# 2.  Feature- / AttentiveTransformer
+# --------------------------------------------------------------------------
 class FeatureTransformer(nn.Module):
-    """Трансформер признаков с GLU блоками."""
-    def __init__(self, input_dim, hidden_dim, n_glu_layers, dropout=0.1,
-                 virtual_batch_size=128, momentum=0.9):
+    """Последовательность GLU блоков с residual connections."""
+    def __init__(self,
+                 input_dim: int,
+                 output_dim: int | None = None,
+                 n_glu: int = 2,
+                 shared: Optional[Sequence[nn.Module]] = None,
+                 norm: str | None = None,
+                 dropout: float = 0.0):
         super().__init__()
-        layers = []
-        for i in range(n_glu_layers):
-            layers.append(GLUBlock(
-                input_dim if i == 0 else hidden_dim,
-                hidden_dim,
-                virtual_batch_size=virtual_batch_size,
-                momentum=momentum
-            ))
-        self.layers = nn.ModuleList(layers)
-        self.dropout = nn.Dropout(dropout)
+        output_dim = output_dim or input_dim
+        self.blocks = nn.ModuleList()
+        shared = list(shared) if shared else []
+        current_dim = input_dim # Размерность входа для первого блока
 
-    def forward(self, x):
-        for layer in self.layers:
-            x = layer(x)
-            x = self.dropout(x)
-        return x
+        # Добавляем общие блоки, обновляя current_dim
+        for block in shared:
+            if not isinstance(block, GLUBlock):
+                 raise TypeError("Shared block must be an instance of GLUBlock")
+            # Проверяем совместимость размерностей (грубо)
+            # TODO: Более строгая проверка?
+            # if block.fc.in_features != current_dim:
+            #     raise ValueError(f"Shared block input dim {block.fc.in_features} != current dim {current_dim}")
+            self.blocks.append(block)
+            # Выход GLU блока - половина выхода fc слоя
+            current_dim = block.fc.out_features // 2
+
+        # Добавляем независимые блоки
+        for i in range(n_glu):
+            # Входная размерность первого независимого блока - выход последнего общего (или input_dim)
+            # Выходная размерность - output_dim
+            # Входная размерность последующих независимых блоков - output_dim
+            block_input_dim = current_dim if i == 0 else output_dim
+            self.blocks.append(
+                GLUBlock(block_input_dim,
+                         output_dim,
+                         norm=norm,
+                         p_dropout=dropout)
+            )
+            current_dim = output_dim # Обновляем размерность для следующего независимого блока
+
+        self.scale = math.sqrt(0.5)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        current_x = x
+        for i, blk in enumerate(self.blocks):
+            block_input = current_x # Вход для текущего блока
+            x_processed = blk(block_input)
+
+            # Применяем residual connection: добавляем вход блока к выходу,
+            # если их размерности совпадают.
+            if x_processed.shape == block_input.shape:
+                 current_x = (x_processed + block_input) * self.scale
+            else:
+                 # Если размерность изменилась (например, в первом общем блоке),
+                 # остаточную связь не применяем.
+                 current_x = x_processed
+
+        return current_x # Возвращаем выход последнего блока
 
 
 class AttentiveTransformer(nn.Module):
-    """Модуль для вычисления маски внимания."""
-    def __init__(self, input_dim, output_dim, virtual_batch_size=128, momentum=0.9):
+    """Вычисляет маску внимания для признаков."""
+    # Принимает исходную размерность input_dim и размерность attention-фич n_a
+    def __init__(self, input_dim: int, attention_dim: int, momentum=0.1):
         super().__init__()
-        self.fc = nn.Linear(input_dim, output_dim)
-        self.bn = GhostBatchNorm(output_dim, virtual_batch_size, momentum)
-        self.attentive = nn.Linear(output_dim, output_dim)
+        # Линейный слой отображает attention features (n_a) -> input features (input_dim)
+        self.fc = nn.Linear(attention_dim, input_dim)
+        # BN применяется *после* линейного слоя к размерности input_dim
+        self.bn = nn.BatchNorm1d(input_dim, momentum=momentum)
 
-    def forward(self, x, prior_scales=None):
-        shape = x.shape
-        if len(shape) > 2:
-            x = self.bn(self.fc(x).view(-1, shape[-1])).view(shape)
+    def forward(self, prior: torch.Tensor, x_att: torch.Tensor) -> torch.Tensor:
+        # x_att имеет размерность (B, attention_dim = n_a)
+        # prior имеет размерность (B, input_dim)
+
+        # Отображаем attention features в пространство input_dim
+        a = self.fc(x_att) # Размерность: (B, input_dim)
+
+        # Применяем BN (обрабатываем 2D вход для BN1d)
+        if a.ndim == 2:
+            # BN ожидает (N, C) или (N, C, L), у нас (B, input_dim) -> OK
+            a = self.bn(a) # Размерность: (B, input_dim)
+        elif a.ndim == 3: # Не должно происходить, если x_att это (B, n_a)
+             # Если все же 3D, BN ожидает (N, C, L), транспонируем
+             a = self.bn(a.transpose(1, 2)).transpose(1, 2)
         else:
-            x = self.bn(self.fc(x))
+             raise ValueError(f"AttentiveTransformer ожидает 2D или 3D тензор для BN после fc, получено: {a.ndim}D")
 
-        x = F.relu(x)
+        # Применяем prior scaling
+        # Убедимся, что prior имеет совместимую размерность (обычно (B, input_dim))
+        if prior.shape != a.shape:
+             # Попробуем исправить, если последняя размерность prior = 1
+              if prior.ndim == a.ndim and prior.size(-1) == 1:
+                  prior = prior.expand_as(a)
+              else:
+                  raise ValueError(f"Размерности prior {prior.shape} и a {a.shape} не совпадают для умножения в AttentiveTransformer")
 
-        return sparsemax(self.attentive(x), dim=-1)
+        a = a * prior # Размеры: (B, input_dim) * (B, input_dim) -> OK
+
+        # Возвращаем маску softmax
+        return torch.softmax(a, dim=-1) # Размерность: (B, input_dim)
 
 
-class TabNet(nn.Module):
-    """Архитектура TabNet нейронной сети."""
-    def __init__(self,
-                 input_dim,
-                 cat_idxs,
-                 cat_dims,
-                 cat_emb_dim=4,
-                 n_steps=5,
-                 n_d=64,  # Заменяем hidden_dim на n_d
-                 n_a=64,  # Добавляем параметр n_a
-                 decision_dim=64,
-                 n_glu_layers=2,
-                 dropout=0.1,
-                 gamma=1.5,
-                 lambda_sparse=0.0001,
-                 virtual_batch_size=128,
-                 momentum=0.9,
-                 output_dim=1,
-                 dynamic_emb_size=False,  # Параметр для динамического размера эмбеддингов
-                 min_emb_dim=2,  # Минимальный размер эмбеддинга
-                 max_emb_dim=16):  # Максимальный размер эмбеддинга
+# --------------------------------------------------------------------------
+# 3.  Эмбеддинги для числовых и категориальных фич
+# --------------------------------------------------------------------------
+class NumericEmbedding(nn.Module):
+    """Простое взвешивание числовых признаков."""
+    def __init__(self, num_numeric: int, d_model: int):
         super().__init__()
+        # Параметры для взвешивания каждого числового признака
+        self.weight = nn.Parameter(torch.randn(num_numeric, d_model))
+        self.bias   = nn.Parameter(torch.zeros(num_numeric, d_model))
 
-        self.cat_idxs = cat_idxs
-        self.cat_dims = cat_dims
-        self.cat_emb_dim = cat_emb_dim
-        self.input_dim = input_dim
-        self.n_steps = n_steps
-        self.gamma = gamma
-        self.lambda_sparse = lambda_sparse
-        self.virtual_batch_size = virtual_batch_size
-        self.momentum = momentum
-        self.n_d = n_d  # Сохраняем размерность для решающего слоя
-        self.n_a = n_a  # Сохраняем размерность для блока внимания
-        self.dynamic_emb_size = dynamic_emb_size
-        self.min_emb_dim = min_emb_dim
-        self.max_emb_dim = max_emb_dim
+    def forward(self, x_num: torch.Tensor) -> torch.Tensor:
+        # x_num: (B, F_num) -> (B, F_num, 1) * (F_num, d) + (F_num, d) -> (B, F_num, d)
+        return x_num.unsqueeze(-1) * self.weight + self.bias
 
-        # Определяем размеры эмбеддингов - динамически или фиксированным размером
-        if self.dynamic_emb_size and len(cat_dims) > 0:
-            # Для каждой категориальной переменной вычисляем размер эмбеддинга
-            # исходя из формулы log2(размер_категории) + 1, но не меньше min_emb_dim и не больше max_emb_dim
-            self.emb_dims = [min(max(int(math.ceil(np.log2(dim))) + 1, self.min_emb_dim), self.max_emb_dim)
-                             for dim in cat_dims]
-        else:
-            # Используем фиксированный размер для всех категориальных переменных
-            self.emb_dims = [cat_emb_dim] * len(cat_dims)
 
-        # Эмбеддинги для категориальных признаков с динамическими размерами
-        self.embeddings = nn.ModuleList(
-            [nn.Embedding(cat_dim, emb_dim) for cat_dim, emb_dim in zip(cat_dims, self.emb_dims)]
+class CatEmbedding(nn.Module):
+    """Эмбеддинги для категориальных признаков."""
+    def __init__(self, cat_dims: Sequence[int], d_model: Union[int, Sequence[int]]):
+        super().__init__()
+        # Если d_model - целое число, используем его для всех категорий
+        if isinstance(d_model, int):
+            d_model = [d_model] * len(cat_dims)
+        # Проверка совпадения длин списков размерностей словарей и эмбеддингов
+        elif len(d_model) != len(cat_dims):
+             raise ValueError(f"Количество размерностей эмбеддингов ({len(d_model)}) "
+                              f"должно совпадать с количеством категориальных признаков ({len(cat_dims)})")
+
+        # Создаем список слоев Embedding
+        self.embs = nn.ModuleList(
+            nn.Embedding(v, d) for v, d in zip(cat_dims, d_model)
         )
+        # Суммарная размерность всех категориальных эмбеддингов
+        self.out_dim = sum(d_model)
 
-        # Размерность признаков после эмбеддингов (с учетом динамических размеров)
-        self.post_embed_dim = input_dim - len(cat_idxs) + sum(self.emb_dims)
+    def forward(self, x_cat: torch.Tensor) -> torch.Tensor:
+        # x_cat: (B, F_cat)
+        vecs = []
+        for i, emb in enumerate(self.embs):
+            # Проверяем и ограничиваем индексы перед передачей в Embedding
+            safe_indices = torch.clamp(x_cat[:, i], 0, emb.num_embeddings - 1)
+            vecs.append(emb(safe_indices)) # (B, d_i)
+        # Результат: (B, F_cat, d) - объединяем по новой размерности
+        return torch.stack(vecs, dim=1)
 
-        self.feature_transformers = nn.ModuleList()
-        self.attentive_transformers = nn.ModuleList()
 
-        for step in range(n_steps):
-            self.feature_transformers.append(
-                FeatureTransformer(
-                    self.post_embed_dim,
-                    n_d + n_a,  # Общая размерность выхода n_d + n_a
-                    n_glu_layers,
-                    dropout,
-                    virtual_batch_size,
-                    momentum
-                )
+# --------------------------------------------------------------------------
+# 4.  TabNetCore – «сердце» модели
+# --------------------------------------------------------------------------
+class TabNetCore(nn.Module):
+    """Основная архитектура TabNet с последовательными шагами внимания."""
+    def __init__(self,
+                 input_dim: int,                  # Размерность входа после эмбеддингов и flatten
+                 output_dim: int,                 # Размерность выхода модели
+                 n_steps: int = 3,                # Количество шагов принятия решений
+                 decision_dim: int = 64,          # Общая размерность выхода FeatureTransformer (Nd + Na)
+                 n_shared: int = 2,               # Количество общих GLU блоков в FeatureTransformer
+                 n_independent: int = 2,          # Количество независимых GLU блоков в FeatureTransformer на каждом шаге
+                 glu_dropout: float = 0.0,        # Dropout в GLU блоках
+                 norm: str | None = None,         # Тип нормализации в GLU блоках ('batch', 'layer', None)
+                 gamma: float = 1.5):             # Коэффициент релаксации для prior (из статьи)
+        super().__init__()
+        if decision_dim % 2 != 0:
+            raise ValueError("decision_dim должен быть четным для разделения на d и a.")
+
+        self.n_d = decision_dim // 2
+        self.n_a = decision_dim // 2
+        self.gamma = gamma
+        self.n_steps = n_steps
+
+        # Создаем общие блоки, если они есть
+        shared_blocks = []
+        if n_shared > 0:
+             # Первый общий блок преобразует input_dim -> decision_dim
+             # Последующие общие блоки: decision_dim -> decision_dim
+             current_shared_dim = input_dim
+             for i in range(n_shared):
+                 block = GLUBlock(current_shared_dim, decision_dim, norm=norm, p_dropout=glu_dropout)
+                 shared_blocks.append(block)
+                 current_shared_dim = decision_dim # Выход GLU - decision_dim
+
+        self.shared_blocks = nn.ModuleList(shared_blocks)
+
+        # Начальное преобразование: либо общие блоки, либо линейный слой
+        if self.shared_blocks:
+             # Используем общие блоки для начального преобразования
+             # Размерность входа для шагов будет decision_dim
+             step_input_dim = decision_dim
+        else:
+            # Если нет общих блоков, используем Linear + BN + ReLU
+            self.initial_projection = nn.Sequential(
+                nn.Linear(input_dim, decision_dim),
+                nn.BatchNorm1d(decision_dim),
+                nn.ReLU()
             )
+            step_input_dim = decision_dim
 
-            if step < n_steps - 1:
-                self.attentive_transformers.append(
-                    AttentiveTransformer(
-                        n_a,  # Используем n_a для AttentiveTransformer
-                        self.post_embed_dim,
-                        virtual_batch_size,
-                        momentum
-                    )
-                )
+        # Feature Transformers для каждого шага (только независимые блоки)
+        self.step_ft = nn.ModuleList()
+        for _ in range(n_steps):
+            # Вход для FeatureTransformer шага - выход предыдущего шага (step_input_dim)
+            # Выход - decision_dim
+            self.step_ft.append(
+                FeatureTransformer(step_input_dim, decision_dim,
+                                   n_glu=n_independent,
+                                   shared=None, # Только независимые блоки
+                                   norm=norm,
+                                   dropout=glu_dropout)
+            )
+            # Вход для следующего шага остается decision_dim
+            step_input_dim = decision_dim
 
-        self.decision_layer = nn.Linear(n_d, decision_dim)
-        self.final_layer = nn.Linear(decision_dim, output_dim)
+        # Attentive Transformers (отображают n_a -> input_dim)
+        self.att = nn.ModuleList()
+        for _ in range(n_steps):
+             # Передаем исходную размерность input_dim и n_a
+            self.att.append(AttentiveTransformer(input_dim, self.n_a))
 
-    def forward(self, x, return_masks=False):
-        # Применяем эмбеддинги для категориальных признаков
-        if len(self.cat_idxs) > 0:
-            x_num = []
-            x_cat = []
-            cat_i = 0
+        # Финальный линейный слой для агрегированных decision outputs (n_d)
+        self.fc_out = nn.Linear(self.n_d, output_dim)
+        # Входная нормализация (BatchNorm) перед первым шагом
+        self.input_bn = nn.BatchNorm1d(input_dim)
 
-            # Разделяем числовые и категориальные признаки
-            for i in range(self.input_dim):
-                if i in self.cat_idxs:
-                    # Сохраняем категориальные признаки для эмбеддинга
-                    x_cat.append(x[:, i].long())
-                    cat_i += 1
-                else:
-                    # Сохраняем числовые признаки как есть
-                    x_num.append(x[:, i].unsqueeze(1))
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Возвращает:
+            - outputs: финальный выход модели (логиты)
+            - agg_mask_loss: агрегированная потеря разреженности масок (для регуляризации)
+        """
+        # x: (B, input_dim = F_all * d_model)
+        prior = torch.ones_like(x) # Начальный prior scale (B, input_dim)
+        agg_decision_output = 0.0  # Агрегированный выход decision компонентов
+        total_entropy = 0.0        # Суммарная энтропия масок для регуляризации
 
-            # Применяем эмбеддинги к категориальным признакам
-            embedded_cats = []
-            for i, cat_values in enumerate(x_cat):
-                # Добавляем безопасную индексацию - ограничиваем значения диапазоном эмбеддинга
-                safe_indices = torch.clamp(cat_values, 0, self.cat_dims[i] - 1)
-                embedded_cats.append(self.embeddings[i](safe_indices))
+        # Нормализуем вход
+        x_bn = self.input_bn(x) # (B, input_dim)
 
-            # Объединяем все признаки
-            if embedded_cats:
-                x = torch.cat(x_num + embedded_cats, dim=1)
-            else:
-                x = torch.cat(x_num, dim=1)
+        # Применяем начальное преобразование (общие блоки или линейное)
+        if self.shared_blocks:
+            current_features = x_bn
+            for block in self.shared_blocks:
+                current_features = block(current_features)
+            # current_features теперь (B, decision_dim)
+        else:
+            current_features = self.initial_projection(x_bn) # (B, decision_dim)
 
-        # Применяем последовательные шаги TabNet
-        outputs = torch.zeros(x.size(0), self.final_layer.out_features).to(x.device)
-        prior_scales = torch.ones_like(x).to(x.device)
+        masks = [] # Сохраняем маски для возможного анализа
 
-        # Сохраняем маски для регуляризации разреженности
-        masks = []
+        for i, (ft, att) in enumerate(zip(self.step_ft, self.att)):
+            # 1. Применяем FeatureTransformer шага
+            # Вход: current_features (B, decision_dim), Выход: y (B, decision_dim)
+            y = ft(current_features)
 
-        for step in range(self.n_steps):
-            # Применяем маску к входным данным
-            masked_x = x * prior_scales
+            # 2. Разделяем выход на decision (d) и attention (a) части
+            d, a = torch.split(y, [self.n_d, self.n_a], dim=-1) # d: (B, n_d), a: (B, n_a)
 
-            # Преобразуем через feature transformer
-            x_transformed = self.feature_transformers[step](masked_x)
+            # 3. Агрегируем decision output (применяем ReLU как в статье)
+            agg_decision_output = agg_decision_output + F.relu(d)
 
-            # Разделяем выход на d[i] и a[i]
-            d_i = x_transformed[:, :self.n_d]  # Первые n_d элементов для decision
-            a_i = x_transformed[:, self.n_d:]  # Оставшиеся n_a элементов для attention
-
-            # Считаем выход текущего шага используя d_i
-            step_output = F.relu(self.decision_layer(d_i))
-            outputs += self.final_layer(step_output) / self.n_steps
-
-            # Обновляем маску для следующего шага используя a_i
-            if step < self.n_steps - 1:
-                mask = self.attentive_transformers[step](a_i)
+            # 4. Вычисляем маску внимания (если не последний шаг)
+            # Используем AttentiveTransformer, который отображает 'a' -> 'mask' размерности input_dim
+            if i < self.n_steps: # Маска не нужна после последнего шага
+                mask = att(prior, a) # mask: (B, input_dim) - Корректный размер!
                 masks.append(mask)
 
-                # Обеспечиваем правильную размерность маски
-                if mask.size(1) != prior_scales.size(1):
-                    # Если размеры не совпадают, повторяем значения маски
-                    mask = mask.repeat(1, prior_scales.size(1) // mask.size(1))
-                    if mask.size(1) < prior_scales.size(1):
-                        padding = torch.zeros(mask.size(0), prior_scales.size(1) - mask.size(1), device=mask.device)
-                        mask = torch.cat([mask, padding], dim=1)
-                    elif mask.size(1) > prior_scales.size(1):
-                        mask = mask[:, :prior_scales.size(1)]
+                # 5. Обновляем prior scale для следующего шага
+                # prior_{i+1} = prior_i * (gamma - mask_i)
+                prior = prior * (self.gamma - mask) # Размеры (B, input_dim) совпадают
 
-                # Обновляем prior_scales согласно формуле из статьи
-                prior_scales = prior_scales * (self.gamma - mask)
+                # 6. Обновляем признаки для следующего шага
+                # Используем выход 'd' (decision part) для следующего шага? Или 'y'?
+                # В статье (рис 3а) показано, что d_i используется для финального агрегирования,
+                # а выход FeatureTransformer (вероятно, 'y') идет на вход следующего шага.
+                # Будем использовать 'y' для согласованности размерностей.
+                current_features = y # (B, decision_dim)
 
-        if return_masks:
-            return outputs, masks
-        return outputs
+                # 7. Вычисляем энтропию маски для регуляризации разреженности
+                # Усредняем энтропию по батчу для этого шага
+                entropy_step = -torch.sum(mask * torch.log(mask + 1e-10), dim=-1)
+                total_entropy = total_entropy + torch.mean(entropy_step) # Суммируем средние энтропии шагов
 
-    def calculate_sparse_loss(self, masks):
-        """Вычисляет регуляризацию разреженности для масок."""
-        if self.lambda_sparse == 0 or not masks:
-            return 0.0
+        # 8. Финальный выход через линейный слой
+        # Используем агрегированный decision output
+        outputs = self.fc_out(agg_decision_output) # (B, output_dim)
 
-        batch_size = masks[0].size(0)
-        total_loss = 0.0
+        # 9. Вычисляем среднюю потерю энтропии по всем шагам
+        if masks:
+            avg_entropy_loss = total_entropy / self.n_steps # Делим суммарную среднюю энтропию на кол-во шагов
+        else:
+            avg_entropy_loss = torch.tensor(0.0, device=x.device)
 
-        for mask in masks:
-            entropy = -torch.sum(mask * torch.log(mask + 1e-10)) / (batch_size * self.n_steps)
-            total_loss += entropy
-
-        return self.lambda_sparse * total_loss
+        return outputs, avg_entropy_loss # Возвращаем логиты и потерю энтропии
 
 
-def softmax(x, axis=None):
-    """Вычисление softmax по указанной оси"""
-    x_max = np.max(x, axis=axis, keepdims=True)
-    exp_x = np.exp(x - x_max)
-    return exp_x / np.sum(exp_x, axis=axis, keepdims=True)
+# --------------------------------------------------------------------------
+# 5.  TabNet – полный класс с эмбеддингами
+# --------------------------------------------------------------------------
+class TabNet(nn.Module):
+    """Полная модель TabNet, объединяющая эмбеддинги и TabNetCore."""
+    def __init__(self,
+                 num_continuous: int,                 # Количество числовых признаков
+                 cat_dims: Sequence[int],             # Размеры словарей категориальных признаков
+                 cat_idx: Sequence[int],              # Индексы категориальных признаков в исходном тензоре
+                 d_model: int = 8,                    # Размерность эмбеддингов (одинаковая для всех)
+                 output_dim: int = 1,                 # Размерность выходного слоя
+                 dropout_emb: float = 0.05,           # Dropout после эмбеддингов
+                 **core_kw):                          # Параметры для TabNetCore
+        super().__init__()
+
+        # Определяем индексы числовых признаков
+        num_features_total = num_continuous + len(cat_idx)
+        self.num_idx = [i for i in range(num_features_total) if i not in cat_idx]
+        self.cat_idx = list(cat_idx) # Сохраняем как список
+
+        # Создаем слои эмбеддингов
+        self.num_emb = NumericEmbedding(len(self.num_idx), d_model) \
+                       if self.num_idx else nn.Identity() # Identity если числовых нет
+        self.cat_emb = CatEmbedding(cat_dims, d_model) \
+                       if self.cat_idx else nn.Identity() # Identity если категориальных нет
+
+        # Вычисляем размерность входа для TabNetCore
+        # Каждый признак (числовой или категориальный) эмбеддится в d_model
+        flat_dim = num_features_total * d_model
+        if flat_dim == 0:
+             raise ValueError("Невозможно создать TabNet без признаков.")
+
+        self.core = TabNetCore(flat_dim, output_dim, **core_kw)
+        self.drop = nn.Dropout(dropout_emb)
+
+    def _split(self, X: torch.Tensor) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """Разделяет входной тензор на числовые и категориальные части."""
+        X_num = X[:, self.num_idx].float() if self.num_idx else None
+        X_cat = X[:, self.cat_idx].long()  if self.cat_idx else None
+        return X_num, X_cat
+
+    def forward(self, X: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Прямой проход модели.
+
+        Возвращает:
+            - outputs: Финальный выход модели (логиты).
+            - sparse_loss: Потеря разреженности (средняя энтропия масок).
+        """
+        X_num, X_cat = self._split(X)
+        feats = []
+        # Применяем эмбеддинги
+        if X_num is not None and isinstance(self.num_emb, NumericEmbedding):
+            feats.append(self.num_emb(X_num)) # (B, F_num, d)
+        if X_cat is not None and isinstance(self.cat_emb, CatEmbedding):
+            feats.append(self.cat_emb(X_cat)) # (B, F_cat, d)
+
+        if not feats:
+             raise RuntimeError("Нет признаков для обработки после эмбеддингов.")
+
+        # Объединяем эмбеддинги по размерности признаков
+        # feats_combined: (B, F_all, d)
+        feats_combined = torch.cat(feats, dim=1)
+
+        # Применяем Dropout и выравниваем в 2D тензор для TabNetCore
+        # feats_flat: (B, F_all * d)
+        feats_flat = self.drop(feats_combined).flatten(1)
+
+        # Пропускаем через TabNetCore
+        outputs, sparse_loss = self.core(feats_flat)
+
+        return outputs, sparse_loss
