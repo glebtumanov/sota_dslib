@@ -106,7 +106,7 @@ class FeatureTransformer(nn.Module):
 class AttentiveTransformer(nn.Module):
     """Вычисляет маску внимания для признаков."""
     # Принимает исходную размерность input_dim и размерность attention-фич n_a
-    def __init__(self, input_dim: int, attention_dim: int, momentum=0.1):
+    def __init__(self, input_dim: int, attention_dim: int, momentum: float = 0.1):
         super().__init__()
         # Линейный слой отображает attention features (n_a) -> input features (input_dim)
         self.fc = nn.Linear(attention_dim, input_dim)
@@ -205,7 +205,8 @@ class TabNetCore(nn.Module):
                  n_independent: int = 2,          # Количество независимых GLU блоков в FeatureTransformer на каждом шаге
                  glu_dropout: float = 0.0,        # Dropout в GLU блоках
                  norm: str | None = None,         # Тип нормализации в GLU блоках ('batch', 'layer', None)
-                 gamma: float = 1.5):             # Коэффициент релаксации для prior (из статьи)
+                 gamma: float = 1.5,              # Коэффициент релаксации для prior (из статьи)
+                 att_momentum: float = 0.1):      # Momentum для BN в AttentiveTransformer
         super().__init__()
         if decision_dim % 2 != 0:
             raise ValueError("decision_dim должен быть четным для разделения на d и a.")
@@ -261,7 +262,7 @@ class TabNetCore(nn.Module):
         self.att = nn.ModuleList()
         for _ in range(n_steps):
              # Передаем исходную размерность input_dim и n_a
-            self.att.append(AttentiveTransformer(input_dim, self.n_a))
+            self.att.append(AttentiveTransformer(input_dim, self.n_a, momentum=att_momentum))
 
         # Финальный линейный слой для агрегированных decision outputs (n_d)
         self.fc_out = nn.Linear(self.n_d, output_dim)
@@ -351,6 +352,7 @@ class TabNet(nn.Module):
                  d_model: int = 8,                    # Размерность эмбеддингов (одинаковая для всех)
                  output_dim: int = 1,                 # Размерность выходного слоя
                  dropout_emb: float = 0.05,           # Dropout после эмбеддингов
+                 att_momentum: float = 0.1,           # Momentum для BN в AttentiveTransformer
                  **core_kw):                          # Параметры для TabNetCore
         super().__init__()
 
@@ -371,7 +373,7 @@ class TabNet(nn.Module):
         if flat_dim == 0:
              raise ValueError("Невозможно создать TabNet без признаков.")
 
-        self.core = TabNetCore(flat_dim, output_dim, **core_kw)
+        self.core = TabNetCore(flat_dim, output_dim, att_momentum=att_momentum, **core_kw)
         self.drop = nn.Dropout(dropout_emb)
 
     def _split(self, X: torch.Tensor) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:

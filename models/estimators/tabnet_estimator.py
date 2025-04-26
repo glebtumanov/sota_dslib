@@ -127,6 +127,9 @@ class TabNetEstimator(BaseEstimator):
     random_state : int, default=42
         Случайное состояние для воспроизводимости.
 
+    momentum : float, default=0.1
+        Momentum для BatchNorm1d в AttentiveTransformer
+
     Примечания
     ----------
     Модель работает только с данными в формате pandas.DataFrame.
@@ -145,7 +148,7 @@ class TabNetEstimator(BaseEstimator):
                  n_independent=2,       # Кол-во независимых GLU блоков на шаге
                  glu_dropout=0.0,       # Dropout в GLU
                  dropout_emb=0.05,      # Dropout после эмбеддингов
-                 glu_norm=None,         # Нормализация в GLU ('batch', 'layer', None)
+                 glu_norm='batch',      # Нормализация в GLU ('batch', 'layer', None)
                  gamma=1.5,             # Коэффициент релаксации prior
                  lambda_sparse=1e-4,    # Коэффициент регуляризации разреженности
                  batch_size=1024,       # Размер батча
@@ -160,6 +163,7 @@ class TabNetEstimator(BaseEstimator):
                  n_bins=10,             # Кол-во бинов для 'binning'
                  device=None,           # Устройство cuda/cpu
                  output_dim=1,          # Размерность выхода (задается подклассами)
+                 momentum=0.1,          # Momentum для BatchNorm1d в AttentiveTransformer
                  verbose=True,          # Выводить прогресс?
                  num_workers=0,         # Кол-во воркеров DataLoader
                  random_state=42):      # Random state
@@ -189,6 +193,7 @@ class TabNetEstimator(BaseEstimator):
         self.verbose = verbose
         self.num_workers = num_workers
         self.random_state = random_state
+        self.momentum = momentum
 
         if random_state is not None:
             torch.manual_seed(random_state)
@@ -203,7 +208,7 @@ class TabNetEstimator(BaseEstimator):
         self.is_fitted_ = False
         self.scaler = None
 
-    def _prepare_data(self, X, y=None, is_train=False, is_multiclass=False, cat_features=None):
+    def _prepare_data(self, X, y=None, is_train=False, cat_features=None, is_multiclass=False):
         features = X.columns.tolist()
 
         if cat_features is not None:
@@ -275,6 +280,7 @@ class TabNetEstimator(BaseEstimator):
             d_model=self.d_model,
             output_dim=self.output_dim,
             dropout_emb=self.dropout_emb,
+            att_momentum=self.momentum,
             **core_kw
         )
 
@@ -437,12 +443,12 @@ class TabNetEstimator(BaseEstimator):
             raise ValueError("Параметр mode должен быть 'max' или 'min'")
 
         # Подготовка данных (вычисляет self.num_continuous, self.cat_dims, self.cat_idxs)
-        train_dataset = self._prepare_data(X, y, is_train=True, cat_features=cat_features, is_multiclass=isinstance(self, TabNetMulticlass))
+        train_dataset = self._prepare_data(X, y, is_train=True, cat_features=cat_features)
 
         val_dataset = None
         if eval_set is not None:
             X_val, y_val = eval_set
-            val_dataset = self._prepare_data(X_val, y_val, is_train=False, cat_features=self.cat_features, is_multiclass=isinstance(self, TabNetMulticlass))
+            val_dataset = self._prepare_data(X_val, y_val, is_train=False, cat_features=self.cat_features)
 
         train_loader = DataLoader(
             train_dataset, batch_size=self.batch_size, shuffle=True,
@@ -553,7 +559,7 @@ class TabNetEstimator(BaseEstimator):
         if cat_features is None:
             cat_features = self.cat_features
 
-        test_dataset = self._prepare_data(X, is_train=False, cat_features=cat_features, is_multiclass=isinstance(self, TabNetMulticlass))
+        test_dataset = self._prepare_data(X, is_train=False, cat_features=cat_features)
         test_loader = DataLoader(
             test_dataset, batch_size=self.batch_size, shuffle=False,
             num_workers=self.num_workers,
@@ -629,9 +635,9 @@ class TabNetMulticlass(TabNetEstimator):
         super().__init__(output_dim=n_classes, **kwargs)
         self.label_encoder = LabelEncoder()
 
-    def _prepare_data(self, X, y=None, is_train=False, cat_features=None):
+    def _prepare_data(self, X, y=None, is_train=False, cat_features=None, is_multiclass=False):
         # Используем is_multiclass=True для CatEmbDataset
-        return super()._prepare_data(X, y, is_train=is_train, is_multiclass=True, cat_features=cat_features)
+        return super()._prepare_data(X, y, is_train=is_train, cat_features=cat_features, is_multiclass=True)
 
     def _get_criterion(self):
         return torch.nn.CrossEntropyLoss()
@@ -687,7 +693,7 @@ class TabNetMulticlass(TabNetEstimator):
         if cat_features is None:
             cat_features = self.cat_features
 
-        test_dataset = self._prepare_data(X, is_train=False, cat_features=cat_features, is_multiclass=True)
+        test_dataset = self._prepare_data(X, is_train=False, cat_features=cat_features)
         test_loader = DataLoader(
             test_dataset, batch_size=self.batch_size, shuffle=False,
             num_workers=self.num_workers,
