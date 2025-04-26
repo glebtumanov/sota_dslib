@@ -1,6 +1,7 @@
 from __future__ import annotations
 import math, torch, torch.nn as nn, torch.nn.functional as F
 from typing import Sequence, List, Optional, Union
+from .cemlp import GhostBatchNorm
 
 
 # --------------------------------------------------------------------------
@@ -11,31 +12,23 @@ class GLUBlock(nn.Module):
     def __init__(self,
                  in_features: int,
                  out_features: int | None = None,
-                 norm: str | None = None,          # <= по умолчанию нет нормализации
+                 virtual_batch_size: int = 128,
                  p_dropout: float = 0.0,
                  dim: int = -1):
         super().__init__()
         out_features = out_features or in_features
-        if norm == "batch":
-            # Используем BatchNorm1d с настройками по умолчанию
-            self.norm = nn.BatchNorm1d(in_features)
-        elif norm == "layer":
-            self.norm = nn.LayerNorm(in_features)
-        else:                                       # None
-            self.norm = nn.Identity()
+
+        # Используем GhostBatchNorm с momentum=0.01
+        self.norm = GhostBatchNorm(in_features, virtual_batch_size, momentum=0.1)
 
         self.fc   = nn.Linear(in_features, out_features * 2)
         self.dim  = dim
         self.drop = nn.Dropout(p_dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Обработка BatchNorm1d для 3D тензоров (B, SeqLen, Features)
-        if isinstance(self.norm, nn.BatchNorm1d) and x.ndim == 3:
-             # BatchNorm1d ожидает (B, C, L), поэтому транспонируем
-            x = self.norm(x.transpose(1, 2)).transpose(1, 2)
-        else:
-            # LayerNorm и Identity работают с (B, ..., Features)
-            x = self.norm(x)
+        # Применяем нормализацию (GhostBatchNorm)
+        # Ожидается 2D вход (B, Features) в текущей архитектуре TabNet
+        x = self.norm(x)
         return self.drop(F.glu(self.fc(x), dim=self.dim))
 
 
@@ -49,7 +42,7 @@ class FeatureTransformer(nn.Module):
                  output_dim: int | None = None,
                  n_glu: int = 2,
                  shared: Optional[Sequence[nn.Module]] = None,
-                 norm: str | None = None,
+                 virtual_batch_size: int = 128,
                  dropout: float = 0.0):
         super().__init__()
         output_dim = output_dim or input_dim
@@ -78,7 +71,7 @@ class FeatureTransformer(nn.Module):
             self.blocks.append(
                 GLUBlock(block_input_dim,
                          output_dim,
-                         norm=norm,
+                         virtual_batch_size=virtual_batch_size,
                          p_dropout=dropout)
             )
             current_dim = output_dim # Обновляем размерность для следующего независимого блока
@@ -206,7 +199,8 @@ class TabNetCore(nn.Module):
                  glu_dropout: float = 0.0,        # Dropout в GLU блоках
                  norm: str | None = None,         # Тип нормализации в GLU блоках ('batch', 'layer', None)
                  gamma: float = 1.5,              # Коэффициент релаксации для prior (из статьи)
-                 att_momentum: float = 0.1):      # Momentum для BN в AttentiveTransformer
+                 att_momentum: float = 0.1,       # Momentum для BN в AttentiveTransformer
+                 virtual_batch_size: int = 128): # Размер вирт. батча для GhostBatchNorm в GLU
         super().__init__()
         if decision_dim % 2 != 0:
             raise ValueError("decision_dim должен быть четным для разделения на d и a.")
@@ -223,7 +217,7 @@ class TabNetCore(nn.Module):
              # Последующие общие блоки: decision_dim -> decision_dim
              current_shared_dim = input_dim
              for i in range(n_shared):
-                 block = GLUBlock(current_shared_dim, decision_dim, norm=norm, p_dropout=glu_dropout)
+                 block = GLUBlock(current_shared_dim, decision_dim, virtual_batch_size=virtual_batch_size, p_dropout=glu_dropout)
                  shared_blocks.append(block)
                  current_shared_dim = decision_dim # Выход GLU - decision_dim
 
@@ -252,7 +246,7 @@ class TabNetCore(nn.Module):
                 FeatureTransformer(step_input_dim, decision_dim,
                                    n_glu=n_independent,
                                    shared=None, # Только независимые блоки
-                                   norm=norm,
+                                   virtual_batch_size=virtual_batch_size,
                                    dropout=glu_dropout)
             )
             # Вход для следующего шага остается decision_dim
@@ -353,6 +347,7 @@ class TabNet(nn.Module):
                  output_dim: int = 1,                 # Размерность выходного слоя
                  dropout_emb: float = 0.05,           # Dropout после эмбеддингов
                  att_momentum: float = 0.1,           # Momentum для BN в AttentiveTransformer
+                 virtual_batch_size: int = 128,       # Размер вирт. батча для GhostBatchNorm в GLU
                  **core_kw):                          # Параметры для TabNetCore
         super().__init__()
 
@@ -373,7 +368,7 @@ class TabNet(nn.Module):
         if flat_dim == 0:
              raise ValueError("Невозможно создать TabNet без признаков.")
 
-        self.core = TabNetCore(flat_dim, output_dim, att_momentum=att_momentum, **core_kw)
+        self.core = TabNetCore(flat_dim, output_dim, att_momentum=att_momentum, virtual_batch_size=virtual_batch_size, **core_kw)
         self.drop = nn.Dropout(dropout_emb)
 
     def _split(self, X: torch.Tensor) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:

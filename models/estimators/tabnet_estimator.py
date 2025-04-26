@@ -71,9 +71,6 @@ class TabNetEstimator(BaseEstimator):
         Вероятность дропаута после слоя эмбеддингов.
         Рекомендуемый диапазон: [0.0-0.3]
 
-    glu_norm : str | None, default=None
-        Тип нормализации в GLU блоках ('batch', 'layer' или None).
-
     gamma : float, default=1.5
         Коэффициент затухания для масок внимания (prior relaxation).
         Рекомендуемый диапазон: [1.0-2.0]
@@ -130,6 +127,9 @@ class TabNetEstimator(BaseEstimator):
     momentum : float, default=0.1
         Momentum для BatchNorm1d в AttentiveTransformer
 
+    virtual_batch_size : int, default=128
+        Размер виртуального батча для GhostBatchNorm в GLU
+
     Примечания
     ----------
     Модель работает только с данными в формате pandas.DataFrame.
@@ -148,7 +148,6 @@ class TabNetEstimator(BaseEstimator):
                  n_independent=2,       # Кол-во независимых GLU блоков на шаге
                  glu_dropout=0.0,       # Dropout в GLU
                  dropout_emb=0.05,      # Dropout после эмбеддингов
-                 glu_norm='batch',      # Нормализация в GLU ('batch', 'layer', None)
                  gamma=1.5,             # Коэффициент релаксации prior
                  lambda_sparse=1e-4,    # Коэффициент регуляризации разреженности
                  batch_size=1024,       # Размер батча
@@ -166,7 +165,8 @@ class TabNetEstimator(BaseEstimator):
                  momentum=0.1,          # Momentum для BatchNorm1d в AttentiveTransformer
                  verbose=True,          # Выводить прогресс?
                  num_workers=0,         # Кол-во воркеров DataLoader
-                 random_state=42):      # Random state
+                 random_state=42,
+                 virtual_batch_size=128): # Размер виртуального батча для GhostBatchNorm в GLU
 
         self.d_model = d_model
         self.n_steps = n_steps
@@ -175,7 +175,6 @@ class TabNetEstimator(BaseEstimator):
         self.n_independent = n_independent
         self.glu_dropout = glu_dropout
         self.dropout_emb = dropout_emb
-        self.glu_norm = glu_norm
         self.gamma = gamma
         self.lambda_sparse = lambda_sparse
         self.batch_size = batch_size
@@ -194,6 +193,7 @@ class TabNetEstimator(BaseEstimator):
         self.num_workers = num_workers
         self.random_state = random_state
         self.momentum = momentum
+        self.virtual_batch_size = virtual_batch_size
 
         if random_state is not None:
             torch.manual_seed(random_state)
@@ -270,7 +270,6 @@ class TabNetEstimator(BaseEstimator):
             'n_shared': self.n_shared,
             'n_independent': self.n_independent,
             'glu_dropout': self.glu_dropout,
-            'norm': self.glu_norm,
             'gamma': self.gamma
         }
         return TabNet(
@@ -281,6 +280,7 @@ class TabNetEstimator(BaseEstimator):
             output_dim=self.output_dim,
             dropout_emb=self.dropout_emb,
             att_momentum=self.momentum,
+            virtual_batch_size=self.virtual_batch_size,
             **core_kw
         )
 
