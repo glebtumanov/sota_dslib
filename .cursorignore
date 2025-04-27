@@ -5,3 +5,5 @@ LICENSE
 *.zip
 *.parquet
 *.pickle
+*.db
+*.xlsx

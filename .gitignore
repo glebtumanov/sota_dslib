@@ -178,3 +178,6 @@ cython_debug/
 *.parquet
 catboost_info/
 *.pickle
+*.db
+*.xlsx
+tests/*.ipynb

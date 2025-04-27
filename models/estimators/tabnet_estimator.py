@@ -67,6 +67,9 @@ class TabNetEstimator(BaseEstimator):
         Вероятность дропаута в GLU блоках.
         Рекомендуемый диапазон: [0.0-0.5]
 
+    glu_momentum : float, default=0.1
+        Momentum для GhostBatchNorm в GLU
+
     dropout_emb : float, default=0.05
         Вероятность дропаута после слоя эмбеддингов.
         Рекомендуемый диапазон: [0.0-0.3]
@@ -124,7 +127,7 @@ class TabNetEstimator(BaseEstimator):
     random_state : int, default=42
         Случайное состояние для воспроизводимости.
 
-    momentum : float, default=0.1
+    att_momentum : float, default=0.1
         Momentum для BatchNorm1d в AttentiveTransformer
 
     virtual_batch_size : int, default=128
@@ -147,6 +150,7 @@ class TabNetEstimator(BaseEstimator):
                  n_shared=2,            # Кол-во общих GLU блоков
                  n_independent=2,       # Кол-во независимых GLU блоков на шаге
                  glu_dropout=0.0,       # Dropout в GLU
+                 glu_momentum=0.1,      # <---- Добавлен параметр glu_momentum для GhostBN в GLU
                  dropout_emb=0.05,      # Dropout после эмбеддингов
                  gamma=1.5,             # Коэффициент релаксации prior
                  lambda_sparse=1e-4,    # Коэффициент регуляризации разреженности
@@ -162,7 +166,7 @@ class TabNetEstimator(BaseEstimator):
                  n_bins=10,             # Кол-во бинов для 'binning'
                  device=None,           # Устройство cuda/cpu
                  output_dim=1,          # Размерность выхода (задается подклассами)
-                 momentum=0.1,          # Momentum для BatchNorm1d в AttentiveTransformer
+                 att_momentum=0.1,      # <---- Переименовал для ясности, что это для AttentiveTransformer
                  verbose=True,          # Выводить прогресс?
                  num_workers=0,         # Кол-во воркеров DataLoader
                  random_state=42,
@@ -174,6 +178,7 @@ class TabNetEstimator(BaseEstimator):
         self.n_shared = n_shared
         self.n_independent = n_independent
         self.glu_dropout = glu_dropout
+        self.glu_momentum = glu_momentum
         self.dropout_emb = dropout_emb
         self.gamma = gamma
         self.lambda_sparse = lambda_sparse
@@ -189,10 +194,10 @@ class TabNetEstimator(BaseEstimator):
         self.n_bins = n_bins
         self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.output_dim = output_dim
+        self.att_momentum = att_momentum
         self.verbose = verbose
         self.num_workers = num_workers
         self.random_state = random_state
-        self.momentum = momentum
         self.virtual_batch_size = virtual_batch_size
 
         if random_state is not None:
@@ -279,7 +284,8 @@ class TabNetEstimator(BaseEstimator):
             d_model=self.d_model,
             output_dim=self.output_dim,
             dropout_emb=self.dropout_emb,
-            att_momentum=self.momentum,
+            att_momentum=self.att_momentum,
+            glu_momentum=self.glu_momentum,
             virtual_batch_size=self.virtual_batch_size,
             **core_kw
         )
