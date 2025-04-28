@@ -90,7 +90,7 @@ class TabNetModel(BaseModel):
             'decision_dim': 64,           # Общая размерность выхода FeatureTransformer (Nd+Na), должна быть четной
             'n_shared': 2,                # Кол-во общих GLU блоков
             'n_independent': 2,           # Кол-во независимых GLU блоков на шаге
-            'glu_dropout': 0.1,           # Dropout в GLU блоках
+            'dropout_glu': 0.1,           # Dropout в GLU блоках
             'dropout_emb': 0.1,           # Dropout после эмбеддингов
             'glu_norm': 'batch',          # Тип нормализации в GLU ('batch', 'layer', None)
             'gamma': 1.3,                 # Коэффициент релаксации prior (обычно 1.0-2.0)

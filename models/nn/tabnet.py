@@ -45,7 +45,7 @@ class FeatureTransformer(nn.Module):
                  shared: Optional[Sequence[nn.Module]] = None,
                  virtual_batch_size: int = 128,
                  dropout: float = 0.0,
-                 glu_momentum: float = 0.1):
+                 momentum_glu: float = 0.1):
         super().__init__()
         output_dim = output_dim or input_dim
         self.blocks = nn.ModuleList()
@@ -64,7 +64,7 @@ class FeatureTransformer(nn.Module):
             # Выход GLU блока - половина выхода fc слоя
             current_dim = block.fc.out_features // 2
 
-        # Добавляем независимые блоки, передавая glu_momentum
+        # Добавляем независимые блоки, передавая momentum_glu
         for i in range(n_glu):
             # Входная размерность первого независимого блока - выход последнего общего (или input_dim)
             # Выходная размерность - output_dim
@@ -75,7 +75,7 @@ class FeatureTransformer(nn.Module):
                          output_dim,
                          virtual_batch_size=virtual_batch_size,
                          p_dropout=dropout,
-                         momentum=glu_momentum)
+                         momentum=momentum_glu)
             )
             current_dim = output_dim # Обновляем размерность для следующего независимого блока
 
@@ -199,11 +199,11 @@ class TabNetCore(nn.Module):
                  decision_dim: int = 64,          # Общая размерность выхода FeatureTransformer (Nd + Na)
                  n_shared: int = 2,               # Количество общих GLU блоков в FeatureTransformer
                  n_independent: int = 2,          # Количество независимых GLU блоков в FeatureTransformer на каждом шаге
-                 glu_dropout: float = 0.0,        # Dropout в GLU блоках
+                 dropout_glu: float = 0.0,        # Dropout в GLU блоках
                  norm: str | None = None,         # Тип нормализации в GLU блоках ('batch', 'layer', None)
                  gamma: float = 1.5,              # Коэффициент релаксации для prior (из статьи)
-                 att_momentum: float = 0.1,       # Momentum для BN в AttentiveTransformer
-                 glu_momentum: float = 0.1,
+                 momentum_att: float = 0.1,       # Momentum для BN в AttentiveTransformer
+                 momentum_glu: float = 0.1,
                  virtual_batch_size: int = 128): # Размер вирт. батча для GhostBatchNorm в GLU
         super().__init__()
         if decision_dim % 2 != 0:
@@ -213,9 +213,9 @@ class TabNetCore(nn.Module):
         self.n_a = decision_dim // 2
         self.gamma = gamma
         self.n_steps = n_steps
-        self.glu_momentum = glu_momentum
+        self.momentum_glu = momentum_glu
 
-        # Создаем общие блоки, передавая glu_momentum
+        # Создаем общие блоки, передавая momentum_glu
         shared_blocks = []
         if n_shared > 0:
              # Первый общий блок преобразует input_dim -> decision_dim
@@ -224,8 +224,8 @@ class TabNetCore(nn.Module):
              for i in range(n_shared):
                  block = GLUBlock(current_shared_dim, decision_dim,
                                   virtual_batch_size=virtual_batch_size,
-                                  p_dropout=glu_dropout,
-                                  momentum=self.glu_momentum)
+                                  p_dropout=dropout_glu,
+                                  momentum=self.momentum_glu)
                  shared_blocks.append(block)
                  current_shared_dim = decision_dim # Выход GLU - decision_dim
 
@@ -245,7 +245,7 @@ class TabNetCore(nn.Module):
             )
             step_input_dim = decision_dim
 
-        # Feature Transformers для каждого шага (передаем glu_momentum)
+        # Feature Transformers для каждого шага (передаем momentum_glu)
         self.step_ft = nn.ModuleList()
         for _ in range(n_steps):
             # Вход для FeatureTransformer шага - выход предыдущего шага (step_input_dim)
@@ -255,8 +255,8 @@ class TabNetCore(nn.Module):
                                    n_glu=n_independent,
                                    shared=None, # Только независимые блоки
                                    virtual_batch_size=virtual_batch_size,
-                                   dropout=glu_dropout,
-                                   glu_momentum=self.glu_momentum)
+                                   dropout=dropout_glu,
+                                   momentum_glu=self.momentum_glu)
             )
             # Вход для следующего шага остается decision_dim
             step_input_dim = decision_dim
@@ -265,7 +265,7 @@ class TabNetCore(nn.Module):
         self.att = nn.ModuleList()
         for _ in range(n_steps):
              # Передаем исходную размерность input_dim и n_a
-            self.att.append(AttentiveTransformer(input_dim, self.n_a, momentum=att_momentum))
+            self.att.append(AttentiveTransformer(input_dim, self.n_a, momentum=momentum_att))
 
         # Финальный линейный слой для агрегированных decision outputs (n_d)
         self.fc_out = nn.Linear(self.n_d, output_dim)
@@ -355,8 +355,8 @@ class TabNet(nn.Module):
                  d_model: int = 8,                    # Размерность эмбеддингов (одинаковая для всех)
                  output_dim: int = 1,                 # Размерность выходного слоя
                  dropout_emb: float = 0.05,           # Dropout после эмбеддингов
-                 att_momentum: float = 0.1,           # Momentum для BN в AttentiveTransformer
-                 glu_momentum: float = 0.1,
+                 momentum_att: float = 0.1,           # Momentum для BN в AttentiveTransformer
+                 momentum_glu: float = 0.1,
                  virtual_batch_size: int = 128,       # Размер вирт. батча для GhostBatchNorm в GLU
                  **core_kw):                          # Параметры для TabNetCore
         super().__init__()
@@ -378,10 +378,10 @@ class TabNet(nn.Module):
         if flat_dim == 0:
              raise ValueError("Невозможно создать TabNet без признаков.")
 
-        # Передаем glu_momentum в TabNetCore
+        # Передаем momentum_glu в TabNetCore
         self.core = TabNetCore(flat_dim, output_dim,
-                               att_momentum=att_momentum,
-                               glu_momentum=glu_momentum,
+                               momentum_att=momentum_att,
+                               momentum_glu=momentum_glu,
                                virtual_batch_size=virtual_batch_size,
                                **core_kw)
         self.drop = nn.Dropout(dropout_emb)

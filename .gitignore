@@ -181,3 +181,4 @@ catboost_info/
 *.db
 *.xlsx
 tests/*.ipynb
+*.ods

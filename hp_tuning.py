@@ -1,7 +1,7 @@
 #! /usr/bin/env python3
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_absolute_error, roc_auc_score # Добавляем roc_auc_score
+from sklearn.metrics import mean_absolute_error, roc_auc_score, accuracy_score # Добавляем accuracy_score
 import optuna
 import torch
 import warnings
@@ -14,7 +14,7 @@ from typing import Callable, Dict, Any, List, Tuple, Optional
 
 # --- Утилиты Форматирования ---
 
-def format_value_for_code(key: str, value: Any) -> str:
+def format_value_for_code(key: str, value: Any, apply_rounding: bool = True) -> str:
     """Форматирует значение параметра для вставки в Python код с новыми правилами."""
     if isinstance(value, str):
         return f"'{value}'"
@@ -24,6 +24,9 @@ def format_value_for_code(key: str, value: Any) -> str:
         return str(value)
 
     if isinstance(value, float):
+        if not apply_rounding:
+            return f"{value}" # Возвращаем стандартное представление float
+
         if value == 0.0:
             return "0.0"
 
@@ -50,12 +53,15 @@ def format_value_for_code(key: str, value: Any) -> str:
     # Для других типов (если вдруг появятся)
     return str(value)
 
-def format_value_for_yaml(key: str, value: Any) -> str:
+def format_value_for_yaml(key: str, value: Any, apply_rounding: bool = True) -> str:
     """Форматирует значение параметра для вставки в YAML с новыми правилами."""
     if isinstance(value, (str, bool, int)):
         return str(value) # YAML обрабатывает их без кавычек (кроме спец. случаев)
 
     if isinstance(value, float):
+        if not apply_rounding:
+            return f"{value}" # Возвращаем стандартное представление float
+
         if value == 0.0:
             return "0.0"
 
@@ -203,7 +209,7 @@ def objective(trial: optuna.Trial,
 
         # 4.5 Проверяем наличие predict_proba для метрик вероятности
         predict_method = model.predict
-        if eval_metric in ['roc_auc']:
+        if eval_metric == 'roc_auc':
             if hasattr(model, 'predict_proba'):
                 predict_method = model.predict_proba
             else:
@@ -237,6 +243,8 @@ def objective(trial: optuna.Trial,
         # TODO: Сделать расчет метрики более гибким (передавать функцию?)
         if eval_metric == 'mae':
             metric_value = mean_absolute_error(y_test, y_pred_output)
+        elif eval_metric == 'accuracy':
+            metric_value = accuracy_score(y_test, y_pred_output)
         elif eval_metric == 'roc_auc':
             # predict_proba обычно возвращает [prob_0, prob_1]
             if y_pred_output.ndim == 2 and y_pred_output.shape[1] == 2:
@@ -303,7 +311,7 @@ def save_results_to_excel(study: optuna.Study, filename: str):
         print(f"Error: Не удалось сохранить результаты в Excel: {e}")
 
 
-def print_study_summary(study: optuna.Study, static_params_objective: Dict[str, Any]):
+def print_study_summary(study: optuna.Study, static_params_objective: Dict[str, Any], rounded_output: bool = True):
     """Выводит итоговую информацию и генерирует код для Python и YAML."""
     print("\n--- Результаты подбора гиперпараметров ---")
     # Определяем имя метрики из исследования
@@ -326,7 +334,7 @@ def print_study_summary(study: optuna.Study, static_params_objective: Dict[str, 
         estimator_name = study.user_attrs.get("estimator_class_name", "Estimator") # Получаем имя класса из атрибутов
         python_code_lines = [f"model = {estimator_name}("]
         for key, value in sorted(all_best_params.items()):
-            formatted_value = format_value_for_code(key, value)
+            formatted_value = format_value_for_code(key, value, apply_rounding=rounded_output)
             python_code_lines.append(f"    {key} = {formatted_value},")
         python_code_lines.append(")")
         python_code = "\n".join(python_code_lines)
@@ -334,7 +342,7 @@ def print_study_summary(study: optuna.Study, static_params_objective: Dict[str, 
         # --- Генерация YAML кода ---
         yaml_code_lines = ["hyperparameters:"]
         for key, value in sorted(study.best_params.items()):
-            formatted_value = format_value_for_yaml(key, value)
+            formatted_value = format_value_for_yaml(key, value, apply_rounding=rounded_output)
             yaml_code_lines.append(f"    {key}: {formatted_value}")
         yaml_code = "\n".join(yaml_code_lines)
 
@@ -351,77 +359,6 @@ def print_study_summary(study: optuna.Study, static_params_objective: Dict[str, 
 
     else:
         print("\nЛучшая попытка не найдена.")
-
-
-def train_final_model(estimator_class: Callable,
-                        final_model_params: Dict[str, Any], # Принимаем готовый словарь параметров
-                        X_train: pd.DataFrame, y_train: pd.Series,
-                        X_test: pd.DataFrame, y_test: pd.Series,
-                        cat_features: List[str],
-                        eval_metric: str,
-                        metric_mode: str,
-                        device: torch.device):
-    """Обучает и оценивает финальную модель с лучшими параметрами."""
-    print("\n--- Обучение лучшей модели с лучшими параметрами ---")
-
-    # Объединяем лучшие найденные параметры с статичными параметрами для финального обучения
-    # Параметры уже подготовлены и переданы в final_model_params
-    # Обновляем device, если он был в статичных параметрах
-    if 'device' in final_model_params: # Проверяем наличие ключа
-         final_model_params['device'] = device
-
-    final_model = estimator_class(**final_model_params)
-
-    print("Обучение модели...")
-    fit_kwargs = {
-        'eval_set': (X_test, y_test),
-        'eval_metric': eval_metric,
-        'mode': metric_mode,
-        'pbar': True # Включаем прогресс бар для финального обучения
-    }
-    import inspect
-    sig_fit = inspect.signature(final_model.fit)
-    if 'cat_features' in sig_fit.parameters and cat_features:
-        fit_kwargs['cat_features'] = cat_features
-
-    final_model.fit(X_train, y_train, **fit_kwargs)
-
-    print("Оценка финальной модели...")
-    predict_kwargs = {}
-    sig_predict = inspect.signature(final_model.predict)
-    if 'cat_features' in sig_predict.parameters and cat_features:
-            predict_kwargs['cat_features'] = cat_features
-    if 'pbar' in sig_predict.parameters:
-             predict_kwargs['pbar'] = True # Включаем прогресс бар
-
-    # --- Выбираем метод predict или predict_proba ---
-    final_predict_method = final_model.predict
-    if eval_metric in ['roc_auc']:
-        if hasattr(final_model, 'predict_proba'):
-             final_predict_method = final_model.predict_proba
-        else:
-             print(f"\nWarning: Финальная оценка метрики '{eval_metric}' требует predict_proba, но метод не найден. Используется predict.")
-
-    y_pred_final_output = final_predict_method(X_test, **predict_kwargs)
-
-    # TODO: Сделать расчет метрики более гибким
-    if eval_metric == 'mae':
-         final_metric = mean_absolute_error(y_test, y_pred_final_output)
-    elif eval_metric == 'roc_auc':
-        if y_pred_final_output.ndim == 2 and y_pred_final_output.shape[1] == 2:
-            final_metric = roc_auc_score(y_test, y_pred_final_output[:, 1])
-        else:
-            final_metric = roc_auc_score(y_test, y_pred_final_output)
-    else:
-         print(f"Warning: Расчет финальной метрики '{eval_metric}' не реализован. Используем MAE.")
-         try:
-             final_metric = mean_absolute_error(y_test, y_pred_final_output)
-         except Exception as mae_e:
-             print(f"\nError: Не удалось рассчитать финальную MAE: {mae_e}")
-             final_metric = float('nan') # Возвращаем NaN если ничего не получилось
-
-    print(f"\nФинальное значение {eval_metric} лучшей модели: {final_metric:.4f}")
-    return final_model, final_metric
 
 
 # --- Основная функция запуска ---
@@ -447,14 +384,9 @@ def run_tuning(
     estimator_class: Callable,
     param_space_func: Callable[[optuna.Trial], Dict[str, Any]],
     static_params_objective: Dict[str, Any], # Параметры для objective
-    # Конфигурация финального обучения
-    train_final_flag: bool,
-    # Параметры для переопределения при финальном обучении
-    final_epochs: Optional[int] = None,
-    final_early_stopping: Optional[int] = None,
-    final_verbose: bool = True,
     # Опциональные параметры с дефолтами идут последними
-    optuna_log_level: int = optuna.logging.WARNING # Уровень логирования Optuna
+    optuna_log_level: int = optuna.logging.WARNING, # Уровень логирования Optuna
+    rounded_output: bool = True # Использовать ли округление в финальном выводе
 ):
     """Основная функция для запуска подбора гиперпараметров."""
     global tuning_start_time, total_trials_global
@@ -493,12 +425,18 @@ def run_tuning(
     # Сохраняем имя метрики и класса для использования в print_study_summary
     study.set_user_attr("estimator_class_name", estimator_class.__name__)
 
+    # --- Проверка количества существующих триалов ---
+    completed_trials_count = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
+    print(f"Найдено завершенных триалов в существующем исследовании: {completed_trials_count}")
+
+    skip_optimization = completed_trials_count >= n_trials
+    if skip_optimization:
+        print(f"Количество завершенных триалов ({completed_trials_count}) >= запрошенному ({n_trials}). Оптимизация будет пропущена.")
 
     # --- 6. Запуск оптимизации ---
-    print(f"\nЗапуск Optuna исследования '{study_name}' на {n_trials} попыток (timeout: {timeout_seconds}s)...\n")
     tuning_start_time = time.time()
     total_trials_global = n_trials # Для отображения в колбэке
-    study_completed = False
+    study_completed = False # Флаг успешного завершения optimize
 
     # Оборачиваем objective для передачи доп. аргументов
     obj_func = lambda trial: objective(
@@ -514,15 +452,24 @@ def run_tuning(
         device=device
     )
 
+    optimization_executed = False
     try:
-        study.optimize(
-            obj_func,
-            n_trials=n_trials,
-            timeout=timeout_seconds,
-            callbacks=[progress_callback],
-            show_progress_bar=False
-        )
-        study_completed = True
+        if not skip_optimization:
+            remaining_trials = n_trials - completed_trials_count
+            print(f"\nЗапуск Optuna исследования '{study_name}'. Требуется {remaining_trials} новых попыток (всего {n_trials}, timeout: {timeout_seconds}s)...\n")
+            study.optimize(
+                obj_func,
+                n_trials=remaining_trials, # Запускаем только недостающие триалы
+                timeout=timeout_seconds,
+                callbacks=[progress_callback],
+                show_progress_bar=False
+            )
+            optimization_executed = True
+            study_completed = True # Считаем успешным, если optimize не упал
+        else:
+            # Если оптимизация пропущена, считаем что все 'успешно' для блока finally
+            study_completed = True
+
     except KeyboardInterrupt:
         print("\nОптимизация прервана пользователем (Ctrl+C).")
     except Exception as e:
@@ -532,38 +479,16 @@ def run_tuning(
     finally:
         print()
         total_duration = time.time() - tuning_start_time
-        print(f"Оптимизация завершена. Общее время: {str(datetime.timedelta(seconds=int(total_duration)))}")
+        if optimization_executed:
+            print(f"Оптимизация завершена. Затраченное время: {str(datetime.timedelta(seconds=int(total_duration)))}")
+        else:
+            print("Оптимизация была пропущена.")
 
         # --- 7. Сохранение результатов и вывод статистики (всегда) ---
         save_results_to_excel(study, results_excel_path)
-        print_study_summary(study, static_params_objective)
+        print_study_summary(study, static_params_objective, rounded_output=rounded_output)
 
         # --- 8. Обучение финальной модели ---
-        if train_final_flag and study_completed and study.best_trial:
-            # Готовим параметры для финальной модели
-            final_model_params = {**static_params_objective, **study.best_params}
-            if final_epochs is not None:
-                final_model_params['epochs'] = final_epochs
-            if final_early_stopping is not None:
-                final_model_params['early_stopping_patience'] = final_early_stopping
-            # verbose всегда берем из final_verbose для финального обучения
-            final_model_params['verbose'] = final_verbose
-
-            train_final_model(
-                estimator_class=estimator_class,
-                final_model_params=final_model_params,
-                X_train=X_train, y_train=y_train,
-                X_test=X_test, y_test=y_test,
-                cat_features=categorical_features,
-                eval_metric=metric_to_optimize,
-                metric_mode=direction.replace("imize",""),
-                device=device
-            )
-        elif not train_final_flag:
-            print("\nФинальное обучение пропущено (флаг train_final_flag установлен в False).")
-        elif study.best_trial: # Оптимизация прервана, но есть лучший триал
-             print("Warning: Оптимизация была прервана/завершена с ошибками, но лучшие параметры найдены. Пропускаем финальное обучение.")
-        else: # Нет лучшего триала
-            print("Warning: Не найдено лучших параметров. Пропускаем финальное обучение.")
+        # Финальное обучение удалено
 
     print("\nСкрипт подбора гиперпараметров завершил работу.")
