@@ -30,13 +30,13 @@ ROUNDED_OUTPUT = False
 ESTIMATOR_CLASS = TabNetMulticlass
 
 STATIC_MODEL_PARAMS = {
-    'epochs': 150,
-    'early_stopping_patience': 15,
+    'epochs': 200,
+    'early_stopping_patience': 20,
     'reducelronplateau_patience': 5,
-    'reducelronplateau_factor': 0.3,
+    'reducelronplateau_factor': 0.4,
     'verbose': False,
     'random_state': SPLIT_RANDOM_STATE,
-    'batch_size': 16384,
+    'batch_size': 4096,
     'n_classes': 7,
 }
 

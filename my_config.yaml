@@ -22,9 +22,9 @@ common:
 
 split_data:
     test_rate: 0.2
-    validation_rate: 0.2 # если не казан valid_path
-    binary_threshold: 0.5 # доля положительных классов относительно негативных
+    validation_rate: null # Установи null, чтобы не создавать valid_df
     stratified_split: true # стратифицированное разбиение
+    split_seed: 42
 
 sampling: # начальное сэмплирование данных
     use_sampling: true   # Если поставить false, то сэмплирование делать не будем

@@ -13,13 +13,9 @@ import warnings
 import copy
 warnings.filterwarnings('ignore')
 
-# Импортируем CatEmbDataset из модуля dataset
 from models.dataset import CatEmbDataset
-
-# Импортируем новую реализацию TabNet
 from models.nn.tabnet import TabNet
 
-# Добавляем функцию безопасного сигмоида
 def sigmoid(x):
     """Безопасная реализация сигмоида, избегающая переполнения."""
     # Для положительных x используем стандартную формулу
@@ -144,33 +140,33 @@ class TabNetEstimator(BaseEstimator):
     """
 
     def __init__(self,
-                 d_model=8,             # Размерность эмбеддингов
-                 n_steps=3,             # Количество шагов TabNet
-                 decision_dim=64,       # Общая размерность выхода FeatureTransformer (Nd+Na)
-                 n_shared=2,            # Кол-во общих GLU блоков
+                 d_model=16,            # Размерность эмбеддингов
+                 n_steps=5,             # Количество шагов TabNet
+                 decision_dim=128,      # Общая размерность выхода FeatureTransformer (Nd+Na)
+                 n_shared=1,            # Кол-во общих GLU блоков
                  n_independent=2,       # Кол-во независимых GLU блоков на шаге
-                 dropout_glu=0.0,       # Dropout в GLU
-                 momentum_glu=0.1,      # <---- Добавлен параметр momentum_glu для GhostBN в GLU
+                 dropout_glu=0.1,       # Dropout в GLU
                  dropout_emb=0.05,      # Dropout после эмбеддингов
+                 momentum_glu=0.2,      # параметр momentum_glu для GhostBN в GLU
+                 momentum_att=0.15,     # параметр momentum_att для AttentiveTransformer
                  gamma=1.5,             # Коэффициент релаксации prior
                  lambda_sparse=1e-4,    # Коэффициент регуляризации разреженности
-                 batch_size=1024,       # Размер батча
-                 epochs=100,            # Количество эпох
+                 batch_size=4096,       # Размер батча
+                 epochs=200,            # Количество эпох
                  learning_rate=0.01,    # Скорость обучения
                  early_stopping_patience=10, # Терпение для ранней остановки
                  weight_decay=1e-5,     # L2 регуляризация
                  reducelronplateau_patience=5, # Терпение для снижения LR
-                 reducelronplateau_factor=0.7, # Фактор снижения LR
+                 reducelronplateau_factor=0.3, # Фактор снижения LR
                  scale_numerical=True,  # Масштабировать числовые?
                  scale_method="standard", # Метод масштабирования
                  n_bins=10,             # Кол-во бинов для 'binning'
                  device=None,           # Устройство cuda/cpu
                  output_dim=1,          # Размерность выхода (задается подклассами)
-                 momentum_att=0.1,      # <---- Переименовал для ясности, что это для AttentiveTransformer
-                 verbose=True,          # Выводить прогресс?
+                 verbose=False,         # Выводить прогресс?
                  num_workers=0,         # Кол-во воркеров DataLoader
                  random_state=42,
-                 virtual_batch_size=128): # Размер виртуального батча для GhostBatchNorm в GLU
+                 virtual_batch_size=256): # Размер виртуального батча для GhostBatchNorm в GLU
 
         self.d_model = d_model
         self.n_steps = n_steps

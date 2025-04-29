@@ -15,14 +15,16 @@ common:
         - xgboost
         - random_forest
         - lightautoml
+        # - cemlp
 
 split_data:
     test_rate: 0.2
-    validation_rate: 0.2 # если не казан valid_path
+    validation_rate: null # Установи null, чтобы не создавать valid_df
     stratified_split: true # стратифицированное разбиение
+    split_seed: 42
 
 sampling: # начальное сэмплирование данных
-    use_sampling: true   # Если поставить false, то сэмплирование делать не будем
+    use_sampling: false   # Если поставить false, то сэмплирование делать не будем
     train_sample_size: 100000 # размер тренировочной выборки
     validation_sample_size: 100000 # размер валидационной выборки
     sample_seed: 42 # seed для сэмплирования
@@ -121,10 +123,27 @@ models:
         n_folds: 1
         use_custom_hyperparameters: true
         hyperparameters:
-            dropout: 0.3
-            learning_rate: 0.001
+            d_model: 16
+            n_steps: 5
+            decision_dim: 128
+            n_shared: 1
+            n_independent: 2
+            dropout_glu: 0.01
+            dropout_emb: 0.05
+            gamma: 1.5
+            lambda_sparse: 0.0001
+            batch_size: 4096
+            virtual_batch_size: 512
+            momentum_att: 0.1
+            momentum_glu: 0.01
+            epochs: 2000
+            learning_rate: 0.01
+            early_stopping_patience: 25
+            weight_decay: 1.0e-5
+            reducelronplateau_patience: 5
+            reducelronplateau_factor: 0.5
+            verbose: false
             random_state: 42
-            n_classes: 7
     cemlp:
         n_folds: 1
         use_custom_hyperparameters: true

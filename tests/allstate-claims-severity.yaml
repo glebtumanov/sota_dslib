@@ -16,11 +16,13 @@ common:
         - catboost
         - lightgbm
         - xgboost
+        # - cemlp
 
 split_data:
     test_rate: 0.2
-    validation_rate: 0.2 # если не казан valid_path
-    stratified_split: true # стратифицированное разбиение
+    validation_rate: null # Установи null, чтобы не создавать valid_df
+    stratified_split: false # стратифицированное разбиение
+    split_seed: 42
 
 sampling: # начальное сэмплирование данных
     use_sampling: false   # Если поставить false, то сэмплирование делать не будем
@@ -92,9 +94,27 @@ models:
         n_folds: 1
         use_custom_hyperparameters: true
         hyperparameters:
-            dropout: 0.3
-            learning_rate: 0.001
+            batch_size: 2048
+            d_model: 8
+            decision_dim: 128
+            early_stopping_patience: 15
+            epochs: 150
+            gamma: 1.1892054107471406
+            dropout_glu: 0.30968705087032483
+            dropout_emb: 0.39230153493498665
+            momentum_glu: 0.2807560326459849
+            momentum_att: 0.39002244305272543
+            lambda_sparse: 1.1466091955974868e-06
+            learning_rate: 0.010379724765491935
+            n_independent: 2
+            n_shared: 1
+            n_steps: 5
             random_state: 42
+            reducelronplateau_factor: 0.2
+            reducelronplateau_patience: 5
+            verbose: false
+            virtual_batch_size: 256
+            weight_decay: 1.2272654053979133e-06
     cemlp:
         n_folds: 1
         use_custom_hyperparameters: true
