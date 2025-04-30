@@ -7,7 +7,8 @@ class CEMLPModel(BaseModel):
         super().__init__(task, hp, metrics, calibrate, n_folds, main_metric, verbose, features, cat_features, target_name)
 
     def _train_fold_binary(self, X_train, y_train, X_test, y_test):
-        model = CatEmbMLPBinary(**self.hyperparameters, cat_features=self.cat_features)
+        estimator_kwargs = self._prepare_estimator_kwargs()
+        model = CatEmbMLPBinary(**estimator_kwargs)
         model.fit(
             X_train,
             y_train,
@@ -19,9 +20,8 @@ class CEMLPModel(BaseModel):
 
     def _train_fold_multiclass(self, X_train, y_train, X_test, y_test):
         n_classes = len(set(y_train))
-        hyperparameters = self.hyperparameters.copy()
-        hyperparameters['n_classes'] = n_classes
-        model = CatEmbMLPMulticlass(**hyperparameters, cat_features=self.cat_features)
+        estimator_kwargs = self._prepare_estimator_kwargs({'n_classes': n_classes})
+        model = CatEmbMLPMulticlass(**estimator_kwargs)
         model.fit(
             X_train,
             y_train,
@@ -32,7 +32,8 @@ class CEMLPModel(BaseModel):
         return model
 
     def _train_fold_regression(self, X_train, y_train, X_test, y_test):
-        model = CatEmbMLPRegressor(**self.hyperparameters, cat_features=self.cat_features)
+        estimator_kwargs = self._prepare_estimator_kwargs()
+        model = CatEmbMLPRegressor(**estimator_kwargs)
         model.fit(
             X_train,
             y_train,

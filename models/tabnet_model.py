@@ -10,7 +10,9 @@ class TabNetModel(BaseModel):
         self.cat_features = cat_features
 
     def _train_fold_binary(self, X_train, y_train, X_test, y_test):
-        model = TabNetBinary(**self.hyperparameters)
+        # Подготавливаем аргументы для конструктора эстиматора
+        estimator_kwargs = self._prepare_estimator_kwargs()
+        model = TabNetBinary(**estimator_kwargs)
 
         # Обучаем модель
         model.fit(
@@ -27,11 +29,9 @@ class TabNetModel(BaseModel):
         # Определяем количество классов из обучающих данных
         n_classes = len(y_train.unique())
 
-        # Обновляем гиперпараметры, добавляя n_classes
-        hyperparameters = self.hyperparameters.copy()
-        hyperparameters['n_classes'] = n_classes
-
-        model = TabNetMulticlass(**hyperparameters)
+        # Подготавливаем аргументы, добавляя n_classes
+        estimator_kwargs = self._prepare_estimator_kwargs({'n_classes': n_classes})
+        model = TabNetMulticlass(**estimator_kwargs)
 
         # Обучаем модель
         model.fit(
@@ -45,7 +45,9 @@ class TabNetModel(BaseModel):
         return model
 
     def _train_fold_regression(self, X_train, y_train, X_test, y_test):
-        model = TabNetRegressor(**self.hyperparameters)
+        # Подготавливаем аргументы для конструктора эстиматора
+        estimator_kwargs = self._prepare_estimator_kwargs()
+        model = TabNetRegressor(**estimator_kwargs)
 
         # Обучаем модель
         model.fit(
