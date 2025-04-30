@@ -10,13 +10,13 @@ common:
     model_dir: "/home/gleb/models" # пути сохранения обученных моделей
     skip_cols: []
     selected_models:
-        - tabnet
-        - lightautoml
-        - random_forest
-        - catboost
-        - lightgbm
-        - xgboost
-        # - cemlp
+        - cemlp
+        # - tabnet
+        # - lightautoml
+        # - random_forest
+        # - catboost
+        # - lightgbm
+        # - xgboost
 
 split_data:
     test_rate: 0.2
@@ -136,7 +136,7 @@ models:
             batch_size: 1024
             epochs: 50
             learning_rate: 0.001
-            weight_decay: 1e-5
+            weight_decay: 1.0e-5
             early_stopping_patience: 5
             lr_scheduler_patience: 10
             lr_scheduler_factor: 0.5
@@ -145,7 +145,7 @@ models:
             n_bins: 10
             device: cuda
             output_dim: 1
-            verbose: true
+            verbose: false
             num_workers: 0
             random_state: 42
             use_self_attention: false

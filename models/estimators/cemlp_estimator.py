@@ -288,21 +288,19 @@ class CatEmbMLPEstimator(BaseEstimator):
             cat_dims = []
             for cat_feature in cat_features:
                 if cat_feature in X_processed.columns:
-                    # Если признак уже имеет тип category, получаем его коды
-                    if X_processed[cat_feature].dtype.name == 'category':
-                        # Получаем коды категорий, убеждаемся что они начинаются с 0
-                        X_processed[cat_feature] = X_processed[cat_feature].cat.codes
-                        # Заменяем -1 (для NaN) на 0, если такие есть
-                        X_processed[cat_feature] = X_processed[cat_feature].fillna(0).astype(int)
-                    else:
-                        # Преобразуем в категориальный тип
-                        X_processed[cat_feature] = X_processed[cat_feature].astype('category').cat.codes
-                        # Заменяем -1 (для NaN) на 0, если такие есть
-                        X_processed[cat_feature] = X_processed[cat_feature].fillna(0).astype(int)
+                    # Преобразуем признак в категорию (если ещё не) и получаем коды
+                    if X_processed[cat_feature].dtype.name != 'category':
+                        X_processed[cat_feature] = X_processed[cat_feature].astype('category')
 
-                    # Определяем размерность (количество уникальных значений)
+                    # .cat.codes присваивает -1 для NaN/неизвестных; увеличиваем коды на 1,
+                    # чтобы зарезервировать индекс 0 под <UNK>
+                    X_processed[cat_feature] = (X_processed[cat_feature].cat.codes + 1).astype(int)
+                    # Заполняем возможные -1 (если были) нулями
+                    X_processed[cat_feature] = X_processed[cat_feature].replace({-1: 0})
+
+                    # Размерность эмбеддинга = число уникальных категорий + 1 (индекс 0 — <UNK>)
                     unique_values = X_processed[cat_feature].nunique()
-                    cat_dims.append(int(unique_values))
+                    cat_dims.append(int(unique_values) + 1)
                 else:
                     # Если признак отсутствует, пропускаем его
                     if is_train:
@@ -359,8 +357,23 @@ class CatEmbMLPEstimator(BaseEstimator):
             # Преобразуем категориальные признаки
             for cat_feature in self.cat_features:
                 if cat_feature in X_df.columns:
-                    X_df[cat_feature] = X_df[cat_feature].astype('category').cat.codes
-                    X_df[cat_feature] = X_df[cat_feature].fillna(0).astype(int)
+                    # Преобразуем признак в категорию (если ещё не) и получаем коды
+                    if X_df[cat_feature].dtype.name != 'category':
+                        X_df[cat_feature] = X_df[cat_feature].astype('category')
+
+                    # .cat.codes присваивает -1 для NaN/неизвестных; увеличиваем коды на 1,
+                    # чтобы зарезервировать индекс 0 под <UNK>
+                    X_df[cat_feature] = (X_df[cat_feature].cat.codes + 1).astype(int)
+                    # Заполняем возможные -1 (если были) нулями
+                    X_df[cat_feature] = X_df[cat_feature].replace({-1: 0})
+
+                    # Размерность эмбеддинга = число уникальных категорий + 1 (индекс 0 — <UNK>)
+                    unique_values = X_df[cat_feature].nunique()
+                    self.cat_dims.append(int(unique_values) + 1)
+                else:
+                    # Если признак отсутствует, пропускаем его
+                    if is_train:
+                        print(f"Предупреждение: категориальный признак '{cat_feature}' не найден в данных")
 
             if y is not None:
                 y_df = pd.DataFrame({'target': y})
@@ -768,26 +781,18 @@ class CatEmbMLPEstimator(BaseEstimator):
         return predictions
 
     def predict_proba(self, X, pbar=True):
-        """Предсказание вероятностей классов
+        """Возвращает вероятности классов.
 
-        Параметры:
-        -----------
-        X : pandas.DataFrame или numpy.ndarray
-            Входные признаки размерности (n_samples, n_features)
-        pbar : bool, optional (default=True)
-            Отображать ли прогресс-бар при verbose=True
+        Для binary-case → shape (n_samples, 2)
+        Для multiclass → shape (n_samples, n_classes)"""
 
-        Возвращает:
-        -----------
-        y_proba : numpy.ndarray
-            Вероятности классов размерности (n_samples, 2)
-        """
         self._check_is_fitted()
 
-        # Подготавливаем данные с обученным скейлером
-        test_dataset = self._prepare_data(X, is_train=False)
+        # Мультикласс определяем по размерности выхода
+        is_multiclass = self.output_dim > 1
 
-        # Создаем DataLoader для предсказания
+        test_dataset = self._prepare_data(X, is_train=False, is_multiclass=is_multiclass)
+
         test_loader = DataLoader(
             test_dataset,
             batch_size=self.batch_size,
@@ -797,20 +802,23 @@ class CatEmbMLPEstimator(BaseEstimator):
             pin_memory=True
         )
 
-        # Получаем предсказания
         raw_predictions = self._get_predictions(self.model, test_loader, pbar=pbar)
 
-        # Закрываем DataLoader
         del test_loader
         gc.collect()
 
-        # Преобразуем логиты в вероятности
-        proba_1 = 1 / (1 + np.exp(-raw_predictions)).squeeze()
+        if self.output_dim == 1:
+            proba_1 = 1 / (1 + np.exp(-raw_predictions)).squeeze()
 
-        # Для scikit-learn API нужно возвращать вероятности для обоих классов
-        proba_0 = 1 - proba_1
+            if isinstance(proba_1, (float, int)):
+                proba_1 = np.array([proba_1])
+            elif proba_1.ndim == 0:
+                proba_1 = proba_1.reshape(1)
 
-        return np.column_stack((proba_0, proba_1))
+            proba_0 = 1 - proba_1
+            return np.column_stack((proba_0, proba_1))
+        else:
+            return softmax(raw_predictions, axis=1)
 
     def _check_is_fitted(self):
         """Проверка, что модель обучена"""
@@ -830,7 +838,9 @@ class CatEmbMLPBinary(CatEmbMLPEstimator):
     """
 
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+        # Исключаем возможный дублирующий параметр output_dim
+        kwargs.pop('output_dim', None)
+        super().__init__(output_dim=1, **kwargs)
 
     def _get_criterion(self):
         """Функция потерь для бинарной классификации"""
@@ -858,46 +868,8 @@ class CatEmbMLPBinary(CatEmbMLPEstimator):
         return (probabilities > 0.5).astype(int).squeeze()
 
     def predict_proba(self, X, pbar=True):
-        """Предсказание вероятностей классов
-
-        Параметры:
-        -----------
-        X : pandas.DataFrame или numpy.ndarray
-            Входные признаки размерности (n_samples, n_features)
-        pbar : bool, optional (default=True)
-            Отображать ли прогресс-бар при verbose=True
-
-        Возвращает:
-        -----------
-        y_proba : numpy.ndarray
-            Вероятности классов размерности (n_samples, 2)
-        """
-        self._check_is_fitted()
-
-        # Подготавливаем данные с обученным скейлером
-        test_dataset = self._prepare_data(X, is_train=False)
-
-        # Создаем DataLoader для предсказания
-        test_loader = DataLoader(
-            test_dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            persistent_workers=False if self.num_workers == 0 else True,
-            pin_memory=True
-        )
-
-        # Получаем предсказания
-        raw_predictions = self._get_predictions(self.model, test_loader, pbar=pbar)
-
-        # Закрываем DataLoader
-        del test_loader
-        gc.collect()
-
-        # Преобразуем предсказания в нужный формат
-        predictions = self._transform_predictions(raw_predictions)
-
-        return predictions
+        """Возвращает вероятности классов shape=(n_samples, 2)."""
+        return super().predict_proba(X, pbar=pbar)
 
 
 class CatEmbMLPMulticlass(CatEmbMLPEstimator):
@@ -919,12 +891,16 @@ class CatEmbMLPMulticlass(CatEmbMLPEstimator):
     def __init__(self, n_classes=None, **kwargs):
         if n_classes is None:
             raise ValueError("Для многоклассовой классификации необходимо указать параметр 'n_classes'")
+
+        # Если output_dim передан в kwargs, убираем его, чтобы избежать конфликта
+        kwargs.pop('output_dim', None)
+
         self.n_classes = n_classes
         super().__init__(output_dim=n_classes, **kwargs)
         self.label_encoder = LabelEncoder()
 
-    def _prepare_data(self, X, y=None, is_train=False):
-        """Переопределенный метод для передачи is_multiclass=True"""
+    def _prepare_data(self, X, y=None, is_train=False, is_multiclass=True):
+        """Переопределяем, фиксируя is_multiclass=True, но принимая параметр для совместимости."""
         return super()._prepare_data(X, y, is_train, is_multiclass=True)
 
     def _get_criterion(self):
@@ -973,44 +949,8 @@ class CatEmbMLPMulticlass(CatEmbMLPEstimator):
         return super().fit(X, encoded_y, eval_set=eval_set, eval_metric=eval_metric, mode=mode, pbar=pbar)
 
     def predict_proba(self, X, pbar=True):
-        """Предсказание вероятностей классов
-
-        Параметры:
-        -----------
-        X : pandas.DataFrame или numpy.ndarray
-            Входные признаки размерности (n_samples, n_features)
-        pbar : bool, optional (default=True)
-            Отображать ли прогресс-бар при verbose=True
-
-        Возвращает:
-        -----------
-        y_proba : numpy.ndarray
-            Вероятности классов размерности (n_samples, n_classes)
-        """
-        self._check_is_fitted()
-
-        # Подготавливаем данные с обученным скейлером
-        test_dataset = self._prepare_data(X, is_train=False)
-
-        # Создаем DataLoader для предсказания
-        test_loader = DataLoader(
-            test_dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            persistent_workers=False if self.num_workers == 0 else True,
-            pin_memory=True
-        )
-
-        # Получаем предсказания
-        raw_predictions = self._get_predictions(self.model, test_loader, pbar=pbar)
-
-        # Закрываем DataLoader
-        del test_loader
-        gc.collect()
-
-        # Применяем softmax для получения вероятностей
-        return softmax(raw_predictions, axis=1)
+        """Возвращает вероятности классов shape=(n_samples, n_classes)."""
+        return super().predict_proba(X, pbar=pbar)
 
 
 class CatEmbMLPRegressor(CatEmbMLPEstimator):
@@ -1021,6 +961,8 @@ class CatEmbMLPRegressor(CatEmbMLPEstimator):
     """
 
     def __init__(self, **kwargs):
+        # Исключаем возможный дублирующий параметр output_dim
+        kwargs.pop('output_dim', None)
         super().__init__(output_dim=1, **kwargs)
 
     def _get_criterion(self):

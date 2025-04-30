@@ -210,7 +210,6 @@ class TabNetEstimator(BaseEstimator):
         self.cat_dims = []
         self.features = None
         self.num_continuous = 0 # Будет вычислено в _prepare_data
-        self.cat_features = None
         self.is_fitted_ = False
         self.scaler = None
 

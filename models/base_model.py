@@ -3,16 +3,11 @@ import pickle
 import numpy as np
 from sklearn.model_selection import StratifiedKFold, KFold
 from metrics import Metrics, parse_metric_string
-import abc
 
 
-class BaseModel(abc.ABC):
-    """
-    Абстрактный базовый класс для всех моделей.
-    Определяет общий интерфейс и реализует общую логику.
-    """
-    def __init__(self, task='binary', hp=None, metrics=None, calibrate=None, n_folds=1,
-                 main_metric=None, verbose=True, features=[], cat_features=[], target_name=None):
+class BaseModel:
+    def __init__(self, task, hp=None, metrics=None, calibrate=None, n_folds=1, main_metric=None,
+                 verbose=True, features=[], cat_features=[], target_name=None):
         """
         Инициализация базовой модели.
 
@@ -29,77 +24,17 @@ class BaseModel(abc.ABC):
             target_name (str): Имя целевого признака
         """
         self.task = task
-        self.hp = hp if hp is not None else {}
-        self.metrics = metrics if metrics is not None else []
+        self.hyperparameters = self.get_hyperparameters(task, hp)
+        self.metrics_list = metrics or []
+        self.models = []  # Список моделей (для кросс-валидации)
         self.calibrate = calibrate
+        self.calibration_model = None  # Одна модель калибровки для всех фолдов
         self.n_folds = n_folds
         self.main_metric = main_metric
         self.verbose = verbose
         self.features = features
-        self.cat_features = cat_features if cat_features is not None else []
+        self.cat_features = cat_features
         self.target_name = target_name
-        self.models = []
-        self.oof_predictions = None
-        self.test_predictions = None
-        self.feature_importances = None
-
-        # Определяем гиперпараметры (объединяем пользовательские и дефолтные)
-        self._resolve_hyperparameters()
-
-    def _resolve_hyperparameters(self):
-        """Определяет финальный набор гиперпараметров."""
-        default_hp = self._get_default_hp_for_task()
-        required_hp = self._get_required_hp_for_task()
-
-        # Объединяем: дефолтные < "обязательные" (специфичные для модели) < пользовательские
-        self.hyperparameters = {**default_hp, **required_hp, **self.hp}
-
-    def _prepare_estimator_kwargs(self, specific_kwargs=None):
-        """
-        Подготавливает словарь keyword-аргументов для конструктора эстиматора.
-
-        Объединяет self.hyperparameters со specific_kwargs и добавляет
-        self.cat_features, если 'cat_features' отсутствует.
-
-        Args:
-            specific_kwargs (dict, optional): Словарь специфичных для задачи
-                                              аргументов (например, {'n_classes': N}).
-                                              Defaults to None.
-
-        Returns:
-            dict: Финальный словарь аргументов для конструктора эстиматора.
-        """
-        estimator_kwargs = self.hyperparameters.copy()
-
-        if specific_kwargs:
-            estimator_kwargs.update(specific_kwargs)
-
-        if 'cat_features' not in estimator_kwargs and self.cat_features:
-            estimator_kwargs['cat_features'] = self.cat_features
-
-        return estimator_kwargs
-
-    def _get_default_hp_for_task(self):
-        """Возвращает дефолтные гиперпараметры для текущей задачи."""
-        if self.task == 'binary':
-            return self._get_default_hp_binary()
-        elif self.task == 'multiclass':
-            return self._get_default_hp_multiclass()
-        elif self.task == 'regression':
-            return self._get_default_hp_regression()
-        else:
-            raise ValueError(f"Неизвестный тип задачи: {self.task}")
-
-    def _get_required_hp_for_task(self):
-        """Возвращает обязательные гиперпараметры для текущей задачи."""
-        if self.task == 'binary':
-            return self._get_required_hp_binary()
-        elif self.task == 'multiclass':
-            return self._get_required_hp_multiclass()
-        elif self.task == 'regression':
-            return self._get_required_hp_regression()
-        else:
-            raise ValueError(f"Неизвестный тип задачи: {self.task}")
 
     def train(self, train, test):
         self.models = []
@@ -211,6 +146,31 @@ class BaseModel(abc.ABC):
 
         return metrics_dict
 
+    def get_hyperparameters(self, task, hp=None):
+        """
+        Возвращает гиперпараметры модели в зависимости от типа задачи
+
+        Returns:
+            dict: Гиперпараметры модели
+        """
+        if hp is None:
+            if task == 'binary':
+                return self._get_default_hp_binary()
+            elif task == 'multiclass':
+                return self._get_default_hp_multiclass()
+            elif task == 'regression':
+                return self._get_default_hp_regression()
+        else:
+            if task == 'binary':
+                hp.update(self._get_required_hp_binary())
+                return hp
+            elif task == 'multiclass':
+                hp.update(self._get_required_hp_multiclass())
+                return hp
+            elif task == 'regression':
+                hp.update(self._get_required_hp_regression())
+                return hp
+
     def get_metrics(self):
         """
         Возвращает список объектов Metrics на основе списка строк метрик.
@@ -219,7 +179,7 @@ class BaseModel(abc.ABC):
             List[Metrics]: Список экземпляров класса Metrics
         """
         metrics = []
-        for metric_item in self.metrics:
+        for metric_item in self.metrics_list:
             try:
                 metrics.append(Metrics(metric_item))
             except ValueError as e:
@@ -228,53 +188,43 @@ class BaseModel(abc.ABC):
         return metrics
 
     # Методы, которые должны быть реализованы в дочерних классах
-    @abc.abstractmethod
     def _train_fold_binary(self, X_train, y_train, X_test, y_test):
-        pass
+        raise NotImplementedError("Метод _train_fold_binary должен быть реализован в дочернем классе")
 
-    @abc.abstractmethod
     def _train_fold_multiclass(self, X_train, y_train, X_test, y_test):
-        pass
+        raise NotImplementedError("Метод _train_fold_multiclass должен быть реализован в дочернем классе")
 
-    @abc.abstractmethod
     def _train_fold_regression(self, X_train, y_train, X_test, y_test):
-        pass
+        raise NotImplementedError("Метод _train_fold_regression должен быть реализован в дочернем классе")
 
-    @abc.abstractmethod
     def _predict_fold_binary(self, model, X):
-        pass
+        raise NotImplementedError("Метод _predict_binary_fold должен быть реализован в дочернем классе")
 
-    @abc.abstractmethod
     def _predict_fold_multiclass(self, model, X):
-        pass
+        raise NotImplementedError("Метод _predict_multiclass_fold должен быть реализован в дочернем классе")
 
-    @abc.abstractmethod
     def _predict_fold_regression(self, model, X):
-        pass
+        raise NotImplementedError("Метод _predict_regression_fold должен быть реализован в дочернем классе")
 
-    @abc.abstractmethod
+    # Специфичные для каждого типа задачи обязательные гиперпараметры
     def _get_required_hp_binary(self):
-        pass
+        return {}
 
-    @abc.abstractmethod
     def _get_required_hp_multiclass(self):
-        pass
+        return {}
 
-    @abc.abstractmethod
     def _get_required_hp_regression(self):
-        pass
+        return {}
 
-    @abc.abstractmethod
+    # Гиперпараметры по умолчанию, если в конфиге не указаны (use_custom_hyperparameters = false)
     def _get_default_hp_binary(self):
-        pass
+        return {}
 
-    @abc.abstractmethod
     def _get_default_hp_multiclass(self):
-        pass
+        return {}
 
-    @abc.abstractmethod
     def _get_default_hp_regression(self):
-        pass
+        return {}
 
     def save(self, path):
         """
