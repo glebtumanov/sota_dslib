@@ -5,17 +5,15 @@ class CEMLPModel(BaseModel):
     def __init__(self, task='binary', hp=None, metrics=None, calibrate=None, n_folds=1,
                  main_metric=None, verbose=True, features=[], cat_features=[], target_name=None):
         super().__init__(task, hp, metrics, calibrate, n_folds, main_metric, verbose, features, cat_features, target_name)
-        self.cat_features = cat_features
 
     def _train_fold_binary(self, X_train, y_train, X_test, y_test):
-        model = CatEmbMLPBinary(**self.hyperparameters)
+        model = CatEmbMLPBinary(**self.hyperparameters, cat_features=self.cat_features)
         model.fit(
             X_train,
             y_train,
             eval_set=(X_test, y_test),
             eval_metric='roc_auc',
-            mode='max',
-            cat_features=self.cat_features
+            mode='max'
         )
         return model
 
@@ -23,37 +21,35 @@ class CEMLPModel(BaseModel):
         n_classes = len(set(y_train))
         hyperparameters = self.hyperparameters.copy()
         hyperparameters['n_classes'] = n_classes
-        model = CatEmbMLPMulticlass(**hyperparameters)
+        model = CatEmbMLPMulticlass(**hyperparameters, cat_features=self.cat_features)
         model.fit(
             X_train,
             y_train,
             eval_set=(X_test, y_test),
             eval_metric='accuracy',
-            mode='max',
-            cat_features=self.cat_features
+            mode='max'
         )
         return model
 
     def _train_fold_regression(self, X_train, y_train, X_test, y_test):
-        model = CatEmbMLPRegressor(**self.hyperparameters)
+        model = CatEmbMLPRegressor(**self.hyperparameters, cat_features=self.cat_features)
         model.fit(
             X_train,
             y_train,
             eval_set=(X_test, y_test),
             eval_metric='mse',
-            mode='min',
-            cat_features=self.cat_features
+            mode='min'
         )
         return model
 
     def _predict_fold_binary(self, model, X):
-        return model.predict_proba(X, cat_features=self.cat_features)[:, 1]
+        return model.predict_proba(X)[:, 1]
 
     def _predict_fold_multiclass(self, model, X):
-        return model.predict_proba(X, cat_features=self.cat_features)
+        return model.predict_proba(X)
 
     def _predict_fold_regression(self, model, X):
-        return model.predict(X, cat_features=self.cat_features)
+        return model.predict(X)
 
     def _get_required_hp_binary(self):
         return {}

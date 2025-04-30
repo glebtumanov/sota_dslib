@@ -129,6 +129,9 @@ class TabNetEstimator(BaseEstimator):
     virtual_batch_size : int, default=128
         Размер виртуального батча для GhostBatchNorm в GLU
 
+    cat_features : list, optional (default=None)
+        Список имен категориальных признаков. Если None, определяются автоматически.
+
     Примечания
     ----------
     Модель работает только с данными в формате pandas.DataFrame.
@@ -162,6 +165,7 @@ class TabNetEstimator(BaseEstimator):
                  scale_method="standard", # Метод масштабирования
                  n_bins=10,             # Кол-во бинов для 'binning'
                  device=None,           # Устройство cuda/cpu
+                 cat_features=None,     # Список категориальных признаков
                  output_dim=1,          # Размерность выхода (задается подклассами)
                  verbose=False,         # Выводить прогресс?
                  num_workers=0,         # Кол-во воркеров DataLoader
@@ -195,6 +199,7 @@ class TabNetEstimator(BaseEstimator):
         self.num_workers = num_workers
         self.random_state = random_state
         self.virtual_batch_size = virtual_batch_size
+        self.cat_features = cat_features
 
         if random_state is not None:
             torch.manual_seed(random_state)
@@ -209,16 +214,23 @@ class TabNetEstimator(BaseEstimator):
         self.is_fitted_ = False
         self.scaler = None
 
-    def _prepare_data(self, X, y=None, is_train=False, cat_features=None, is_multiclass=False):
+    def _prepare_data(self, X, y=None, is_train=False, is_multiclass=False):
         features = X.columns.tolist()
 
-        if cat_features is not None:
-            cat_features = [f for f in cat_features if f in features]
-        else:
+        # Используем self.cat_features если он задан, иначе определяем автоматически
+        if self.cat_features is None:
             cat_features = []
             for col in features:
                 if X[col].dtype == 'object' or X[col].dtype.name == 'category':
                     cat_features.append(col)
+
+            # Сохраняем автоматически определенные признаки для последующего использования
+            self.cat_features = cat_features
+        else:
+            # Используем предоставленный список, отфильтровав несуществующие колонки
+            cat_features = [f for f in self.cat_features if f in features]
+            # Обновляем self.cat_features на случай, если были отфильтрованы
+            self.cat_features = cat_features
 
         cat_idxs = [features.index(f) for f in cat_features]
         cat_dims = [int(X[cat_feature].nunique() + 1) for cat_feature in cat_features]
@@ -413,7 +425,7 @@ class TabNetEstimator(BaseEstimator):
         if not self.is_fitted_:
             raise ValueError("Модель не обучена. Сначала выполните метод 'fit'.")
 
-    def fit(self, X, y, eval_set=None, eval_metric=None, mode=None, cat_features=None, pbar=True):
+    def fit(self, X, y, eval_set=None, eval_metric=None, mode=None, pbar=True):
         """Обучение модели TabNet.
 
         Параметры:
@@ -428,8 +440,6 @@ class TabNetEstimator(BaseEstimator):
             Метрика для мониторинга.
         mode : str, optional (default=None)
             Режим оптимизации ('max' или 'min').
-        cat_features : list, optional (default=None)
-            Список имен категориальных признаков. Если None, определяются автоматически.
         pbar : bool, optional (default=True)
             Отображать прогресс-бар.
 
@@ -445,12 +455,12 @@ class TabNetEstimator(BaseEstimator):
             raise ValueError("Параметр mode должен быть 'max' или 'min'")
 
         # Подготовка данных (вычисляет self.num_continuous, self.cat_dims, self.cat_idxs)
-        train_dataset = self._prepare_data(X, y, is_train=True, cat_features=cat_features)
+        train_dataset = self._prepare_data(X, y, is_train=True)
 
         val_dataset = None
         if eval_set is not None:
             X_val, y_val = eval_set
-            val_dataset = self._prepare_data(X_val, y_val, is_train=False, cat_features=self.cat_features)
+            val_dataset = self._prepare_data(X_val, y_val, is_train=False)
 
         train_loader = DataLoader(
             train_dataset, batch_size=self.batch_size, shuffle=True,
@@ -556,12 +566,9 @@ class TabNetEstimator(BaseEstimator):
         self.is_fitted_ = True
         return self
 
-    def predict(self, X, cat_features=None, pbar=True):
+    def predict(self, X, pbar=True):
         self._check_is_fitted()
-        if cat_features is None:
-            cat_features = self.cat_features
-
-        test_dataset = self._prepare_data(X, is_train=False, cat_features=cat_features)
+        test_dataset = self._prepare_data(X, is_train=False)
         test_loader = DataLoader(
             test_dataset, batch_size=self.batch_size, shuffle=False,
             num_workers=self.num_workers,
@@ -600,13 +607,10 @@ class TabNetBinary(TabNetEstimator):
         probabilities = sigmoid(raw_predictions)
         return (probabilities > 0.5).astype(int).squeeze()
 
-    def predict_proba(self, X, cat_features=None, pbar=True):
+    def predict_proba(self, X, pbar=True):
         """Предсказание вероятностей классов [P(0), P(1)]."""
         self._check_is_fitted()
-        if cat_features is None:
-            cat_features = self.cat_features
-
-        test_dataset = self._prepare_data(X, is_train=False, cat_features=cat_features, is_multiclass=False)
+        test_dataset = self._prepare_data(X, is_train=False, is_multiclass=False)
         test_loader = DataLoader(
             test_dataset, batch_size=self.batch_size, shuffle=False,
             num_workers=self.num_workers,
@@ -637,10 +641,6 @@ class TabNetMulticlass(TabNetEstimator):
         super().__init__(output_dim=n_classes, **kwargs)
         self.label_encoder = LabelEncoder()
 
-    def _prepare_data(self, X, y=None, is_train=False, cat_features=None, is_multiclass=False):
-        # Используем is_multiclass=True для CatEmbDataset
-        return super()._prepare_data(X, y, is_train=is_train, cat_features=cat_features, is_multiclass=True)
-
     def _get_criterion(self):
         return torch.nn.CrossEntropyLoss()
 
@@ -668,7 +668,7 @@ class TabNetMulticlass(TabNetEstimator):
         else:
              return predicted_classes
 
-    def fit(self, X, y, eval_set=None, eval_metric=None, mode=None, cat_features=None, pbar=True):
+    def fit(self, X, y, eval_set=None, eval_metric=None, mode=None, pbar=True):
         """Обучение модели с кодировкой меток классов."""
         # Кодируем y перед передачей в базовый fit
         encoded_y = self.label_encoder.fit_transform(y)
@@ -687,15 +687,12 @@ class TabNetMulticlass(TabNetEstimator):
                  encoded_eval_set = None # Пропускаем валидацию, если метки не совпадают
 
         # Вызываем fit базового класса с закодированными метками
-        return super().fit(X, encoded_y, eval_set=encoded_eval_set, eval_metric=eval_metric, mode=mode, cat_features=cat_features, pbar=pbar)
+        return super().fit(X, encoded_y, eval_set=encoded_eval_set, eval_metric=eval_metric, mode=mode, pbar=pbar)
 
-    def predict_proba(self, X, cat_features=None, pbar=True):
+    def predict_proba(self, X, pbar=True):
         """Предсказание вероятностей для всех классов."""
         self._check_is_fitted()
-        if cat_features is None:
-            cat_features = self.cat_features
-
-        test_dataset = self._prepare_data(X, is_train=False, cat_features=cat_features)
+        test_dataset = self._prepare_data(X, is_train=False)
         test_loader = DataLoader(
             test_dataset, batch_size=self.batch_size, shuffle=False,
             num_workers=self.num_workers,

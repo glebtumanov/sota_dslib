@@ -19,7 +19,6 @@ class TabNetModel(BaseModel):
             eval_set=(X_test, y_test),
             eval_metric='roc_auc',
             mode='max',
-            cat_features=self.cat_features
         )
 
         return model
@@ -41,7 +40,6 @@ class TabNetModel(BaseModel):
             eval_set=(X_test, y_test),
             eval_metric='accuracy',
             mode='max',
-            cat_features=self.cat_features
         )
 
         return model
@@ -56,19 +54,18 @@ class TabNetModel(BaseModel):
             eval_set=(X_test, y_test),
             eval_metric='mae',
             mode='min',
-            cat_features=self.cat_features
         )
 
         return model
 
     def _predict_fold_binary(self, model, X):
-        return model.predict_proba(X, cat_features=self.cat_features)[:, 1]
+        return model.predict_proba(X)[:, 1]
 
     def _predict_fold_multiclass(self, model, X):
-        return model.predict_proba(X, cat_features=self.cat_features)
+        return model.predict_proba(X)
 
     def _predict_fold_regression(self, model, X):
-        return model.predict(X, cat_features=self.cat_features)
+        return model.predict(X)
 
     def _get_required_hp_binary(self):
         # Возвращаем обязательные гиперпараметры для бинарной классификации
