@@ -176,55 +176,35 @@ class SOTAModels:
         print("Splitting data ...")
         stratify_col = self.data[self.target_col] if self.stratified_split and self.task in ['binary', 'multiclass'] else None
 
-        # Если validation_rate не указан (None), делим только на train и test
-        if self.validation_rate is None:
-            if self.valid_path:
-                 print("Предупреждение: valid_path указан, но validation_rate = None. valid_path будет проигнорирован, данные будут разделены на train/test.")
+        # Сначала всегда выделяем тестовую выборку
+        self.train_df, self.test_df = train_test_split(
+            self.data,
+            test_size=self.test_rate,
+            random_state=self.split_seed,
+            stratify=stratify_col
+        )
 
-            self.train_df, self.test_df = train_test_split(
-                self.data,
-                test_size=self.test_rate,
+        # Определяем valid_df в зависимости от условий
+        if self.valid_path:
+            # Если valid_path указан, то в качестве valid_df используем загруженные в __init__ данные
+            # self.valid_df уже загружен в __init__
+            print(f"Data split (using valid_path): train shape: {self.train_df.shape}, test shape: {self.test_df.shape}, valid shape: {self.valid_df.shape}")
+        elif self.validation_rate:
+            # Если valid_path не указан, но validation_rate указан, 
+            # выделяем valid_df из train_df (который получен после выделения test_df)
+            stratify_train = self.train_df[self.target_col] if self.stratified_split and self.task in ['binary', 'multiclass'] else None
+            
+            self.train_df, self.valid_df = train_test_split(
+                self.train_df,
+                test_size=self.validation_rate,
                 random_state=self.split_seed,
-                stratify=stratify_col
+                stratify=stratify_train
             )
-            self.valid_df = None # Явно указываем, что валидационного набора нет
-            print(f"Data split (no validation set): train shape: {self.train_df.shape}, test shape: {self.test_df.shape}")
-
-        # Если validation_rate указан (не None)
+            print(f"Data split (train/valid/test): train shape: {self.train_df.shape}, test shape: {self.test_df.shape}, valid shape: {self.valid_df.shape}")
         else:
-            # Если valid_path задан, используем его и делим data только на train/test
-            if self.valid_path:
-                self.train_df, self.test_df = train_test_split(
-                    self.data,
-                    test_size=self.test_rate,
-                    random_state=self.split_seed,
-                    stratify=stratify_col
-                )
-                # self.valid_df уже загружен в __init__
-                print(f"Data split (using valid_path): train shape: {self.train_df.shape}, test shape: {self.test_df.shape}, valid shape: {self.valid_df.shape}")
-            # Если valid_path не задан, делим data на train/valid/test
-            else:
-                # Сначала отделяем test
-                train_valid_df, self.test_df = train_test_split(
-                    self.data,
-                    test_size=self.test_rate,
-                    random_state=self.split_seed,
-                    stratify=stratify_col
-                )
-
-                # Затем разделяем оставшуюся часть на train и valid
-                # Пересчитываем стратификацию для оставшейся части
-                stratify_train_valid = train_valid_df[self.target_col] if self.stratified_split and self.task in ['binary', 'multiclass'] else None
-                # Рассчитываем долю для второго сплита
-                relative_validation_rate = self.validation_rate / (1.0 - self.test_rate)
-
-                self.train_df, self.valid_df = train_test_split(
-                    train_valid_df,
-                    test_size=relative_validation_rate,
-                    random_state=self.split_seed,
-                    stratify=stratify_train_valid
-                )
-                print(f"Data split (train/valid/test): train shape: {self.train_df.shape}, test shape: {self.test_df.shape}, valid shape: {self.valid_df.shape}")
+            # Если valid_path не указан и validation_rate не указан, то не используем valid_df
+            self.valid_df = None
+            print(f"Data split (no validation set): train shape: {self.train_df.shape}, test shape: {self.test_df.shape}")
 
     def _train_model(self, model_type):
         """Обучает модель используя интерфейс BaseModel"""
@@ -242,7 +222,8 @@ class SOTAModels:
             'verbose': self.verbose,
             'features': self.selected_features,
             'cat_features': self.category_columns,
-            'target_name': self.target_col
+            'target_name': self.target_col,
+            'index_cols': self.index_cols
         }
 
         # Динамическая загрузка модулей моделей по мере необходимости
@@ -284,7 +265,7 @@ class SOTAModels:
     def train_models(self):
         """
         Последовательно обучает все модели из списка selected_models
-        и сохраняет только лучшую модель по основной метрике
+        и сохраняет все обученные модели
         """
         # Разделение данных перед обучением
         self._split_data()
@@ -309,17 +290,24 @@ class SOTAModels:
             # Сохранение модели в словаре
             self.trained_models[model_type] = model
 
-            # Вычисление метрик на тестовых данных через интерфейс модели
-            print(f"Метрики на тестовых данных:")
-            metrics_result = model.evaluate(
-                self.test_df[self.selected_features],
-                self.test_df[self.target_col],
-            )
+            # Вычисление метрик на тестовых или валидационных данных через интерфейс модели
+            if self.valid_df is not None:
+                print(f"Метрики на валидационных данных:")
+                metrics_result = model.evaluate(self.valid_df)
+            else:
+                print(f"Метрики на тестовых данных:")
+                metrics_result = model.evaluate(self.test_df)
 
             # Добавляем время обучения к метрикам
             metrics_result['time_spent'] = time_spent
             self.metrics_results[model_type] = metrics_result
-            print()
+            
+            # Сохраняем модель сразу после обучения и оценки
+            model.save(
+                save_path=self.model_dir,
+                metrics_to_save=self.metrics_results[model_type],
+                model_type_name=model_type
+            )
 
         # Вывод таблицы с результатами
         self.print_metrics_table()
@@ -329,123 +317,7 @@ class SOTAModels:
         print(f"Лучшая модель по метрике {self.main_metric}: {best_model_type}")
         print(f"Значение метрики: {best_metric_value}")
 
-        # Сохраняем только лучшую модель
-        best_model = self.trained_models[best_model_type]
-        self.save_model(best_model_type, best_model, best_metric_value)
-
         return self.trained_models, self.metrics_results
-
-    def save_model(self, model_type, model, metric_value):
-        """
-        Сохраняет обученную модель и калибровочную модель (если есть) в zip-архив.
-        Модели каждого фолда сохраняются соответствующим образом:
-        - PyTorch модели: сохраняется state_dict (.pth) и остальная часть estimator (.pickle).
-        - Остальные модели: сохраняется весь объект модели (.pickle).
-        Также сохраняются дополнительные файлы с метаданными.
-
-        Архив сохраняется в поддиректории с именем модели внутри model_dir.
-
-        Args:
-            model_type: Тип модели (например, 'catboost', 'cemlp')
-            model: Экземпляр BaseModel (например, CEMLPModel)
-            metric_value: Значение основной метрики
-        """
-        # Создаем директорию для модели, если не существует
-        model_subdir = os.path.join(self.model_dir, self.model_name)
-        os.makedirs(model_subdir, exist_ok=True)
-
-        # Формируем название архива в формате ЗНАЧЕНИЕ_МЕТРИКИ_ТИП_МОДЕЛИ_ГГГГММДД_ЧЧММ.zip
-        current_timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-        # Округляем метрику для имени файла, заменяем точку на подчеркивание
-        metric_str = f"{metric_value:.4f}".replace('.', '_')
-        archive_name = f"{metric_str}_{model_type}_{current_timestamp}.zip"
-        archive_path = os.path.join(model_subdir, archive_name)
-
-        # Используем временную директорию для подготовки файлов
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Сохраняем каждую фолд-модель
-            for i, fold_model in enumerate(model.models):
-                # Проверяем, является ли модель PyTorch-based estimator
-                is_pytorch_estimator = hasattr(fold_model, 'model') and isinstance(fold_model.model, torch.nn.Module)
-
-                if is_pytorch_estimator:
-                    # 1. Сохраняем state_dict PyTorch модели
-                    state_dict_file = os.path.join(temp_dir, f"fold_{i}_statedict.pth")
-                    torch.save(fold_model.model.state_dict(), state_dict_file)
-
-                    # 2. Временно удаляем PyTorch модель из estimator для pickle
-                    pytorch_model_backup = fold_model.model
-                    fold_model.model = None
-
-                    # 3. Сохраняем остальную часть estimator
-                    estimator_file = os.path.join(temp_dir, f"fold_{i}_estimator.pickle")
-                    joblib.dump(fold_model, estimator_file)
-
-                    # 4. Восстанавливаем PyTorch модель в estimator
-                    fold_model.model = pytorch_model_backup
-                else:
-                    # Сохраняем модель целиком (например, CatBoost, LGBM)
-                    model_file = os.path.join(temp_dir, f"fold_{i}_model.pickle")
-                    joblib.dump(fold_model, model_file)
-
-
-            # Сохраняем калибровочную модель, если она есть (обычно sklearn)
-            if model.calibration_model is not None:
-                # Пока предполагаем, что калибровочная модель не PyTorch
-                calibration_file = os.path.join(temp_dir, "calibration_model.pickle")
-                joblib.dump(model.calibration_model, calibration_file)
-
-            # Сохраняем гиперпараметры в JSON-файле
-            hyperparams_file = os.path.join(temp_dir, "hyperparameters.json")
-            # Используем .hyperparameters из BaseModel, который хранит использованные параметры
-            hyperparams_to_save = model.hyperparameters if hasattr(model, 'hyperparameters') else {}
-            # Преобразуем device в строку, если это объект torch.device
-            if isinstance(hyperparams_to_save.get('device'), torch.device):
-                 hyperparams_to_save['device'] = str(hyperparams_to_save['device'])
-            with open(hyperparams_file, 'w') as f:
-                # Сериализуем с обработкой несериализуемых типов (на всякий случай)
-                json.dump(hyperparams_to_save, f, indent=4, default=lambda o: '<not serializable>')
-
-
-            # Сохраняем метрики в JSON-файле
-            metrics_file = os.path.join(temp_dir, "metrics.json")
-            metrics_to_save = self.metrics_results.get(model_type, {})
-            with open(metrics_file, 'w') as f:
-                # Преобразуем numpy типы в стандартные python типы для JSON
-                 metrics_serializable = {k: (v.item() if isinstance(v, np.generic) else v) for k, v in metrics_to_save.items()}
-                 json.dump(metrics_serializable, f, indent=4)
-
-
-            # Сохраняем список всех признаков
-            features_file = os.path.join(temp_dir, "features.txt")
-            with open(features_file, 'w') as f:
-                f.write('\n'.join(self.selected_features))
-
-            # Сохраняем список категориальных признаков
-            cat_features_file = os.path.join(temp_dir, "cat_features.txt")
-            with open(cat_features_file, 'w') as f:
-                f.write('\n'.join(self.category_columns))
-
-            # Сохраняем информацию о таргете и индексе
-            target_info_file = os.path.join(temp_dir, "target_index_info.txt")
-            with open(target_info_file, 'w') as f:
-                f.write(f"Target column: {self.target_col}\n")
-                f.write(f"Index columns: {', '.join(self.index_cols)}\n")
-                f.write(f"Task type: {self.task}\n")
-                f.write(f"Main metric: {self.main_metric}\n")
-                f.write(f"Model type: {model_type}\n") # Добавим тип модели для удобства
-
-            # Создаем zip-архив
-            with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                # Добавляем все файлы из временной директории
-                for root, _, files in os.walk(temp_dir):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        # Архивируем файл с относительным путем внутри архива
-                        zipf.write(file_path, os.path.basename(file_path))
-
-        if self.verbose:
-            print(f"Лучшая модель {model_type} сохранена в {archive_path}")
 
     def print_metrics_table(self):
         """

@@ -279,37 +279,22 @@ class Metrics:
             return y_scores
 
     def _calc_precision_at_k(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
-        k_perc = self.params.get('k')
-        if k_perc is None:
-            raise ValueError("Параметр 'k' (процент) обязателен для precision@k")
-
-        return self._precision_at_k(y_true, y_pred, k=float(k_perc))
-
-    def _calc_recall_at_k(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
-        k_perc = self.params.get('k')
-        if k_perc is None:
-            raise ValueError("Параметр 'k' (процент) обязателен для recall@k")
-
-        return self._recall_at_k(y_true, y_pred, k=float(k_perc))
-
-    def _calc_f1_at_k(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
-        k_perc = self.params.get('k')
-        if k_perc is None:
-            raise ValueError("Параметр 'k' (процент) обязателен для f1@k")
-
-        return self._f1_at_k(y_true, y_pred, k=float(k_perc))
-
-    def _precision_at_k(self, y_true: np.ndarray, y_scores: np.ndarray, k: float) -> float:
         """
-        Точность на k проценте выборки.
+        Точность на k образцах/проценте выборки.
+        
+        Args:
+            y_true: Истинные значения
+            y_pred: Предсказанные скоры
         """
-        assert 0.0 <= k <= 1.0, "k должно быть от 0 до 1"
+        k = self.params.get('k')
+        if k is None:
+            raise ValueError("Параметр 'k' обязателен для precision@k")
+
         y_true = np.asarray(y_true)
-        scores = self._get_scores_for_k_metrics(np.asarray(y_scores))
-
-        top_n = int(len(scores) * k)
-        if top_n == 0:
-            return 0.0
+        scores = self._get_scores_for_k_metrics(np.asarray(y_pred))
+        
+        # Определяем количество топ образцов
+        top_n = int(k * len(scores)) if k <= 1.0 else int(k)
 
         top_indices = np.argsort(scores)[::-1][:top_n]
         positive_label = 1
@@ -320,13 +305,20 @@ class Metrics:
         num_true_positives_at_k = np.sum(y_true[top_indices] == positive_label)
         return num_true_positives_at_k / top_n
 
-    def _recall_at_k(self, y_true: np.ndarray, y_scores: np.ndarray, k: float) -> float:
+    def _calc_recall_at_k(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
         """
-        Полнота на k проценте выборки.
+        Полнота на k образцах/проценте выборки.
+        
+        Args:
+            y_true: Истинные значения  
+            y_pred: Предсказанные скоры
         """
-        assert 0.0 <= k <= 1.0, "k должно быть от 0 до 1"
+        k = self.params.get('k')
+        if k is None:
+            raise ValueError("Параметр 'k' обязателен для recall@k")
+
         y_true = np.asarray(y_true)
-        scores = self._get_scores_for_k_metrics(np.asarray(y_scores))
+        scores = self._get_scores_for_k_metrics(np.asarray(y_pred))
 
         positive_label = 1
         if len(np.unique(y_true)) > 2:
@@ -336,20 +328,49 @@ class Metrics:
         if num_positive_true == 0:
             return 0.0
 
-        top_n = int(len(scores) * k)
-        if top_n == 0:
-            return 0.0
+        # Определяем количество топ образцов
+        top_n = int(k * len(scores)) if k <= 1.0 else int(k)
 
         top_indices = np.argsort(scores)[::-1][:top_n]
         num_true_positives_at_k = np.sum(y_true[top_indices] == positive_label)
 
         return num_true_positives_at_k / num_positive_true
 
-    def _f1_at_k(self, y_true: np.ndarray, y_scores: np.ndarray, k: float) -> float:
-        """F1-мера на k проценте выборки."""
-        precision_k = self._precision_at_k(y_true, y_scores, k)
-        recall_k = self._recall_at_k(y_true, y_scores, k)
+    def _calc_f1_at_k(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        """
+        F1-мера на k образцах/проценте выборки.
+        
+        Args:
+            y_true: Истинные значения
+            y_pred: Предсказанные скоры  
+        """
+        k = self.params.get('k')
+        if k is None:
+            raise ValueError("Параметр 'k' обязателен для f1@k")
 
+        y_true = np.asarray(y_true)
+        scores = self._get_scores_for_k_metrics(np.asarray(y_pred))
+        
+        # Определяем количество топ образцов
+        top_n = int(k * len(scores)) if k <= 1.0 else int(k)
+
+        top_indices = np.argsort(scores)[::-1][:top_n]
+        positive_label = 1
+
+        if len(np.unique(y_true)) > 2:
+            print(f"Внимание: вычисление f1@k предполагает, что положительный класс - {positive_label}")
+
+        # Считаем precision@k
+        num_true_positives_at_k = np.sum(y_true[top_indices] == positive_label)
+        precision_k = num_true_positives_at_k / top_n
+
+        # Считаем recall@k
+        num_positive_true = np.sum(y_true == positive_label)
+        if num_positive_true == 0:
+            return 0.0
+        recall_k = num_true_positives_at_k / num_positive_true
+
+        # Считаем F1@k
         denominator = precision_k + recall_k
         if denominator == 0:
             return 0.0

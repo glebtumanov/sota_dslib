@@ -11,6 +11,7 @@ from hp_tuning import run_tuning
 
 TRAIN_DATA_PATH = '/www/dslib/spark_sota_modeling/dataset/forest-cover-type/train.parquet'
 CAT_FEATURES_PATH = '/www/dslib/spark_sota_modeling/dataset/forest-cover-type/categorical_features.txt'
+FEATURES_PATH = None
 TARGET_COL = 'cover_type'
 INDEX_COL = None
 
@@ -64,6 +65,7 @@ if __name__ == "__main__":
         # Данные
         train_data_path=TRAIN_DATA_PATH,
         cat_features_path=CAT_FEATURES_PATH,
+        features_path=FEATURES_PATH,
         target_col=TARGET_COL,
         index_col=INDEX_COL,
         stratify_col=STRATIFY_COL,

@@ -1,12 +1,18 @@
 from models.estimators.tabnet_estimator import TabNetBinary, TabNetMulticlass, TabNetRegressor
 from .base_model import BaseModel
+import os
+import joblib
+import torch
+from typing import Optional
 
 
 class TabNetModel(BaseModel):
     def __init__(self, task='binary', hp=None, metrics=None, calibrate=None, n_folds=1,
-                 main_metric=None, verbose=True, features=[], cat_features=[], target_name=None):
+                 main_metric=None, verbose=True, features=[], cat_features=[], target_name=None, 
+                 index_cols=[]):
         # Вызываем инициализатор базового класса
-        super().__init__(task, hp, metrics, calibrate, n_folds, main_metric, verbose, features, cat_features, target_name)
+        super().__init__(task, hp, metrics, calibrate, n_folds, 
+                         main_metric, verbose, features, cat_features, target_name, index_cols)
         self.cat_features = cat_features
 
     def _train_fold_binary(self, X_train, y_train, X_test, y_test):
@@ -67,6 +73,56 @@ class TabNetModel(BaseModel):
     def _predict_fold_regression(self, model, X):
         return model.predict(X)
 
+    def save_model_files(self, save_path: str):
+        """
+        Сохраняет файлы модели TabNet (по одному для каждого фолда)
+        в указанную директорию save_path (которая уже включает тип модели).
+        Для каждой модели сохраняется state_dict PyTorch и остальная часть estimator.
+
+        Args:
+            save_path (str): Полный путь к директории для сохранения файлов модели.
+        """
+        for i, fold_estimator in enumerate(self.models):
+            # fold_estimator здесь это экземпляр TabNetBinary, TabNetMulticlass или TabNetRegressor
+            # у которого есть атрибут .model (сама PyTorch модель)
+            if hasattr(fold_estimator, 'model') and isinstance(fold_estimator.model, torch.nn.Module):
+                # 1. Сохраняем state_dict PyTorch модели
+                state_dict_file = os.path.join(save_path, f"fold_{i}_statedict.pth")
+                torch.save(fold_estimator.model.state_dict(), state_dict_file)
+
+                # 2. Временно удаляем PyTorch модель из estimator для pickle
+                pytorch_model_backup = fold_estimator.model
+                fold_estimator.model = None
+
+                # 3. Сохраняем остальную часть estimator (без PyTorch модели)
+                estimator_file = os.path.join(save_path, f"fold_{i}_estimator.pickle")
+                joblib.dump(fold_estimator, estimator_file)
+
+                # 4. Восстанавливаем PyTorch модель в estimator
+                fold_estimator.model = pytorch_model_backup
+            else:
+                # Если это не ожидаемый PyTorch-based estimator, сохраняем как есть
+                # Этого не должно происходить для TabNetModel при правильной реализации
+                print(f"Warning: Fold {i} for TabNetModel is not a standard PyTorch estimator. Saving as is.")
+                model_file_path = os.path.join(save_path, f"fold_{i}_model.pickle")
+                joblib.dump(fold_estimator, model_file_path)
+
+    def save_all(self, save_path: str, metrics_to_save: Optional[dict] = None):
+        """
+        Сохраняет модель и все артефакты, используя настройки по умолчанию для model_type_name
+        и опционально для metrics_to_save.
+
+        Args:
+            save_path (str): Полный путь к директории для сохранения артефактов.
+            metrics_to_save (Optional[dict]): Словарь с метриками. Если None, BaseModel.save использует стандартные.
+        """
+        model_type_name = "tabnet"
+        super().save(
+            save_path=save_path,
+            model_type_name=model_type_name,
+            metrics_to_save=metrics_to_save
+        )
+
     def _get_required_hp_binary(self):
         # Возвращаем обязательные гиперпараметры для бинарной классификации
         return {}
@@ -97,3 +153,43 @@ class TabNetModel(BaseModel):
         hp = self._get_default_hp()
         # Дополнительные гиперпараметры для регрессии можно добавить здесь
         return hp
+
+    # ---------------------------------------------------------------
+    # Загрузка файлов модели (state_dict + estimator) для каждого фолда
+    # ---------------------------------------------------------------
+
+    def load_model_files(self, load_path: str):
+        """Восстанавливает обученные эстиматоры TabNet из директории.
+
+        Для каждого фолда ожидается пара файлов:
+            fold_{i}_estimator.pickle – объект estimator без .model
+            fold_{i}_statedict.pth   – state_dict PyTorch-модели
+        Если такой пары нет, пробуем загрузить fold_{i}_model.pickle.
+        Возвращает список восстановленных моделей.
+        """
+        restored_models = []
+        idx = 0
+        while True:
+            est_file = os.path.join(load_path, f"fold_{idx}_estimator.pickle")
+            state_file = os.path.join(load_path, f"fold_{idx}_statedict.pth")
+            model_file = os.path.join(load_path, f"fold_{idx}_model.pickle")
+
+            if os.path.exists(est_file) and os.path.exists(state_file):
+                estimator = joblib.load(est_file)
+                # Инициализируем пустую модель внутри эстиматора
+                if estimator.model is None:
+                    estimator.model = estimator._init_model()
+                # Загружаем веса
+                state_dict = torch.load(state_file, map_location=estimator.device)
+                estimator.model.load_state_dict(state_dict)
+                estimator.model.to(estimator.device)
+                estimator.is_fitted_ = True
+                restored_models.append(estimator)
+            elif os.path.exists(model_file):
+                restored_models.append(joblib.load(model_file))
+            else:
+                # Пара (или модель) с таким индексом не найдена – заканчиваем цикл
+                break
+            idx += 1
+
+        return restored_models

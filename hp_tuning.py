@@ -10,11 +10,10 @@ import datetime
 import sys
 import os
 import math # <--- Добавляем импорт math
-from typing import Callable, Dict, Any, List, Tuple, Optional
 
 # --- Утилиты Форматирования ---
 
-def format_value_for_code(key: str, value: Any, apply_rounding: bool = True) -> str:
+def format_value_for_code(key, value, apply_rounding=True):
     """Форматирует значение параметра для вставки в Python код с новыми правилами."""
     if isinstance(value, str):
         return f"'{value}'"
@@ -53,7 +52,7 @@ def format_value_for_code(key: str, value: Any, apply_rounding: bool = True) -> 
     # Для других типов (если вдруг появятся)
     return str(value)
 
-def format_value_for_yaml(key: str, value: Any, apply_rounding: bool = True) -> str:
+def format_value_for_yaml(key, value, apply_rounding=True):
     """Форматирует значение параметра для вставки в YAML с новыми правилами."""
     if isinstance(value, (str, bool, int)):
         return str(value) # YAML обрабатывает их без кавычек (кроме спец. случаев)
@@ -91,19 +90,63 @@ total_trials_global = 0
 
 # --- Функции ---
 
-def load_data(train_path: str, cat_features_path: Optional[str], target_col: str, index_col: Optional[str]) -> Tuple[pd.DataFrame, List[str], str, Optional[str]]:
-    """Загружает тренировочные данные и опционально список категориальных признаков."""
+def load_data(train_path, cat_features_path, features_path, target_col, index_col):
+    """Загружает тренировочные данные и опционально список категориальных признаков и выбранных фичей."""
     print(f"Загрузка данных из {train_path}...")
     try:
         train_df = pd.read_parquet(train_path)
         print(f"Данные загружены. Форма: {train_df.shape}")
 
+        # Загрузка списка выбранных фичей
+        selected_features = None
+        if features_path and os.path.exists(features_path):
+            print(f"Загрузка списка фичей из {features_path}...")
+            with open(features_path, 'r') as f:
+                all_selected_features = [line.strip() for line in f.readlines()]
+            
+            # Фильтруем фичи, которые действительно есть в данных
+            selected_features = [f for f in all_selected_features if f in train_df.columns]
+            missing_features = [f for f in all_selected_features if f not in train_df.columns]
+            if missing_features:
+                print(f"Warning: Следующие фичи из файла не найдены в DataFrame: {missing_features}")
+            if not selected_features:
+                print("Warning: Не найдено валидных фичей из файла в данных. Используются все колонки.")
+                selected_features = None
+            else:
+                print(f"Найдено {len(selected_features)} фичей из файла.")
+        else:
+            print("Файл фичей не указан или не найден. Используются все колонки.")
+
+        # Проверяем наличие обязательных колонок
+        if target_col not in train_df.columns:
+            print(f"Error: Целевая колонка '{target_col}' не найдена в данных.")
+            sys.exit(1)
+        if index_col and index_col not in train_df.columns:
+            print(f"Warning: Колонка индекса '{index_col}' не найдена. Игнорируется.")
+            index_col = None
+
+        # Фильтруем данные по выбранным фичам (если указаны)
+        if selected_features is not None:
+            # Добавляем обязательные колонки к списку фичей
+            cols_to_keep = selected_features.copy()
+            if target_col not in cols_to_keep:
+                cols_to_keep.append(target_col)
+            if index_col and index_col not in cols_to_keep:
+                cols_to_keep.append(index_col)
+            
+            # Фильтруем датафрейм
+            original_shape = train_df.shape
+            train_df = train_df[cols_to_keep]
+            print(f"Данные отфильтрованы по выбранным фичам. Форма: {original_shape} -> {train_df.shape}")
+
+        # Загрузка категориальных признаков
         categorical_features = []
         if cat_features_path and os.path.exists(cat_features_path):
             print(f"Загрузка категориальных признаков из {cat_features_path}...")
             with open(cat_features_path, 'r') as f:
                 all_categorical_features = [line.strip() for line in f.readlines()]
 
+            # Фильтруем категориальные фичи по доступным колонкам (после фильтрации по selected_features)
             categorical_features = [f for f in all_categorical_features if f in train_df.columns]
             missing_cat_features = [f for f in all_categorical_features if f not in train_df.columns]
             if missing_cat_features:
@@ -114,14 +157,6 @@ def load_data(train_path: str, cat_features_path: Optional[str], target_col: str
                  print(f"Найдено {len(categorical_features)} категориальных признаков из файла.")
         else:
              print("Файл категориальных признаков не указан или не найден.")
-
-
-        if target_col not in train_df.columns:
-            print(f"Error: Целевая колонка '{target_col}' не найдена в данных.")
-            sys.exit(1)
-        if index_col and index_col not in train_df.columns:
-            print(f"Warning: Колонка индекса '{index_col}' не найдена. Игнорируется.")
-            index_col = None
 
         return train_df, categorical_features, target_col, index_col
 
@@ -134,7 +169,7 @@ def load_data(train_path: str, cat_features_path: Optional[str], target_col: str
         sys.exit(1)
 
 
-def split_data(df: pd.DataFrame, target_col: str, index_col: Optional[str], test_size: float, random_state: int, stratify_col: Optional[str] = None) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
+def split_data(df, target_col, index_col, test_size, random_state, stratify_col=None):
     """Разделяет данные на обучающую и тестовую выборки с опциональной стратификацией."""
     print("Разделение данных на обучающую и тестовую выборки...")
     cols_to_drop = [target_col]
@@ -158,16 +193,8 @@ def split_data(df: pd.DataFrame, target_col: str, index_col: Optional[str], test
     return X_train, X_test, y_train, y_test
 
 
-def objective(trial: optuna.Trial,
-              estimator_class: Callable,
-              param_space_func: Callable[[optuna.Trial], Dict[str, Any]],
-              static_params_objective: Dict[str, Any],
-              X_train: pd.DataFrame, y_train: pd.Series,
-              X_test: pd.DataFrame, y_test: pd.Series,
-              eval_metric: str, # Метрика для оптимизации
-              metric_mode: str, # 'min' или 'max'
-              cat_features: List[str],
-              device: torch.device) -> float:
+def objective(trial, estimator_class, param_space_func, static_params_objective,
+              X_train, y_train, X_test, y_test, eval_metric, metric_mode, cat_features, device):
     """Универсальная objective функция для Optuna."""
 
     # 1. Получаем гиперпараметры из пространства поиска
@@ -176,11 +203,16 @@ def objective(trial: optuna.Trial,
     # 2. Объединяем с статичными параметрами
     model_params = {**static_params_objective, **hyperparams}
 
-    # Убедимся что device передан если он есть в static_params_objective
+    # 3. Извлекаем параметры, которые должны идти в fit, а не в конструктор
+    fit_params = {}
+    if 'early_stopping_rounds' in model_params:
+        fit_params['early_stopping_rounds'] = model_params.pop('early_stopping_rounds')
+
+    # 4. Убедимся что device передан если он есть
     if 'device' in static_params_objective:
          model_params['device'] = device # Перезаписываем на актуальный device
 
-    # 3. Создаем экземпляр модели
+    # 5. Создаем экземпляр модели
     try:
         model = estimator_class(**model_params)
     except TypeError as e:
@@ -190,26 +222,42 @@ def objective(trial: optuna.Trial,
          raise optuna.TrialPruned(f"Ошибка инициализации модели: {e}")
 
 
-    # 4. Обучаем модель
+    # 6. Обучаем модель
     # Эстиматор должен поддерживать fit с eval_set и cat_features (если они есть)
     try:
+        # Используем метрику из static_params_objective, если она задана, иначе используем eval_metric
+        model_eval_metric = static_params_objective.get('eval_metric', eval_metric)
+        
+        # Базовые параметры fit
         fit_kwargs = {
             'eval_set': (X_test, y_test),
-            'eval_metric': eval_metric,
+            'eval_metric': model_eval_metric, # Используем метрику из параметров модели
             'mode': metric_mode,
             'pbar': False # Отключаем прогресс бар внутри objective
         }
+        
+        # Добавляем параметры для fit, которые были извлечены из model_params
+        fit_kwargs.update(fit_params)
+        
         # Добавляем cat_features если они есть и модель их принимает
         import inspect
         sig = inspect.signature(model.fit)
         if 'cat_features' in sig.parameters and cat_features:
             fit_kwargs['cat_features'] = cat_features
+        
+        # Фильтруем параметры, которые не поддерживаются методом fit
+        supported_params = set(sig.parameters.keys())
+        unsupported_params = [k for k in fit_kwargs if k not in supported_params]
+        if unsupported_params:
+            print(f"\nWarning: Следующие параметры не поддерживаются методом fit класса {estimator_class.__name__}: {unsupported_params}")
+            for param in unsupported_params:
+                fit_kwargs.pop(param)
 
         model.fit(X_train, y_train, **fit_kwargs)
 
-        # 4.5 Проверяем наличие predict_proba для метрик вероятности
+        # 6.5 Проверяем наличие predict_proba для метрик вероятности
         predict_method = model.predict
-        if eval_metric == 'roc_auc':
+        if eval_metric in ['roc_auc', 'AUC']:
             if hasattr(model, 'predict_proba'):
                 predict_method = model.predict_proba
             else:
@@ -220,10 +268,10 @@ def objective(trial: optuna.Trial,
         # Пропускаем триал
         raise optuna.TrialPruned(f"Ошибка обучения: {e}")
 
-    # 5. Делаем предсказания
+    # 7. Делаем предсказания
     try:
         predict_kwargs = {}
-        sig_predict = inspect.signature(model.predict)
+        sig_predict = inspect.signature(predict_method)
         if 'cat_features' in sig_predict.parameters and cat_features:
             predict_kwargs['cat_features'] = cat_features
         if 'pbar' in sig_predict.parameters:
@@ -235,17 +283,23 @@ def objective(trial: optuna.Trial,
         print(f"\nError: Ошибка при предсказании моделью в триале {trial.number}: {e}")
         raise optuna.TrialPruned(f"Ошибка предсказания: {e}")
 
-
-    # 6. Считаем метрику
-    # !! Важно: используем метрику, которую Optuna должна оптимизировать !!
-    # Здесь пока простой пример для MAE, нужно обобщить или передавать функцию расчета
+    # 8. Считаем метрику
     try:
-        # TODO: Сделать расчет метрики более гибким (передавать функцию?)
-        if eval_metric == 'mae':
+        # Преобразование имен метрик между библиотеками
+        metric_mapping = {
+            'AUC': 'roc_auc',  # CatBoost -> sklearn
+            'auc': 'roc_auc',  # LightGBM -> sklearn
+            'roc_auc': 'roc_auc'  # прямое отображение
+        }
+        
+        # Получаем соответствующее имя метрики для sklearn
+        sklearn_metric = metric_mapping.get(eval_metric, eval_metric)
+        
+        if sklearn_metric == 'mae':
             metric_value = mean_absolute_error(y_test, y_pred_output)
-        elif eval_metric == 'accuracy':
+        elif sklearn_metric == 'accuracy':
             metric_value = accuracy_score(y_test, y_pred_output)
-        elif eval_metric == 'roc_auc':
+        elif sklearn_metric == 'roc_auc':
             # predict_proba обычно возвращает [prob_0, prob_1]
             if y_pred_output.ndim == 2 and y_pred_output.shape[1] == 2:
                 metric_value = roc_auc_score(y_test, y_pred_output[:, 1])
@@ -268,7 +322,7 @@ def objective(trial: optuna.Trial,
     return metric_value
 
 
-def progress_callback(study: optuna.Study, trial: optuna.Trial):
+def progress_callback(study, trial):
     """Callback для вывода прогресса Optuna."""
     global tuning_start_time, total_trials_global
 
@@ -296,7 +350,7 @@ def progress_callback(study: optuna.Study, trial: optuna.Trial):
     print(progress_str)
 
 
-def save_results_to_excel(study: optuna.Study, filename: str):
+def save_results_to_excel(study, filename):
     """Сохраняет результаты исследования Optuna в Excel файл."""
     print(f"Сохранение результатов в {filename}...")
     try:
@@ -311,7 +365,7 @@ def save_results_to_excel(study: optuna.Study, filename: str):
         print(f"Error: Не удалось сохранить результаты в Excel: {e}")
 
 
-def print_study_summary(study: optuna.Study, static_params_objective: Dict[str, Any], rounded_output: bool = True):
+def print_study_summary(study, static_params_objective, rounded_output=True):
     """Выводит итоговую информацию и генерирует код для Python и YAML."""
     print("\n--- Результаты подбора гиперпараметров ---")
     # Определяем имя метрики из исследования
@@ -363,31 +417,10 @@ def print_study_summary(study: optuna.Study, static_params_objective: Dict[str, 
 
 # --- Основная функция запуска ---
 
-def run_tuning(
-    # Конфигурация данных
-    train_data_path: str,
-    cat_features_path: Optional[str],
-    target_col: str,
-    index_col: Optional[str],
-    stratify_col: Optional[str], # <--- Добавляем параметр для стратификации
-    # Конфигурация разделения
-    test_size: float,
-    split_random_state: int,
-    # Конфигурация Optuna
-    study_name: str,
-    storage_dir: str, # Директория для SQLite и Excel
-    n_trials: int,
-    timeout_seconds: Optional[int],
-    metric_to_optimize: str, # Имя метрики для оптимизации
-    direction: str, # 'minimize' или 'maximize'
-    # Конфигурация модели и поиска
-    estimator_class: Callable,
-    param_space_func: Callable[[optuna.Trial], Dict[str, Any]],
-    static_params_objective: Dict[str, Any], # Параметры для objective
-    # Опциональные параметры с дефолтами идут последними
-    optuna_log_level: int = optuna.logging.WARNING, # Уровень логирования Optuna
-    rounded_output: bool = True # Использовать ли округление в финальном выводе
-):
+def run_tuning(train_data_path, cat_features_path, features_path, target_col, index_col, stratify_col,
+               test_size, split_random_state, study_name, storage_dir, n_trials, timeout_seconds,
+               metric_to_optimize, direction, estimator_class, param_space_func, static_params_objective,
+               optuna_log_level=optuna.logging.WARNING, rounded_output=True):
     """Основная функция для запуска подбора гиперпараметров."""
     global tuning_start_time, total_trials_global
 
@@ -402,7 +435,7 @@ def run_tuning(
 
     # --- 2. Загрузка данных ---
     train_df, categorical_features, target_col, index_col = load_data(
-        train_data_path, cat_features_path, target_col, index_col
+        train_data_path, cat_features_path, features_path, target_col, index_col
     )
 
     # --- 3. Разделение данных ---
