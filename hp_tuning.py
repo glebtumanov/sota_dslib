@@ -103,7 +103,7 @@ def load_data(train_path, cat_features_path, features_path, target_col, index_co
             print(f"Загрузка списка фичей из {features_path}...")
             with open(features_path, 'r') as f:
                 all_selected_features = [line.strip() for line in f.readlines()]
-            
+
             # Фильтруем фичи, которые действительно есть в данных
             selected_features = [f for f in all_selected_features if f in train_df.columns]
             missing_features = [f for f in all_selected_features if f not in train_df.columns]
@@ -133,7 +133,7 @@ def load_data(train_path, cat_features_path, features_path, target_col, index_co
                 cols_to_keep.append(target_col)
             if index_col and index_col not in cols_to_keep:
                 cols_to_keep.append(index_col)
-            
+
             # Фильтруем датафрейм
             original_shape = train_df.shape
             train_df = train_df[cols_to_keep]
@@ -205,8 +205,8 @@ def objective(trial, estimator_class, param_space_func, static_params_objective,
 
     # 3. Извлекаем параметры, которые должны идти в fit, а не в конструктор
     fit_params = {}
-    if 'early_stopping_rounds' in model_params:
-        fit_params['early_stopping_rounds'] = model_params.pop('early_stopping_rounds')
+    # if 'early_stopping_rounds' in model_params:
+    #     fit_params['early_stopping_rounds'] = model_params.pop('early_stopping_rounds')
 
     # 4. Убедимся что device передан если он есть
     if 'device' in static_params_objective:
@@ -227,7 +227,7 @@ def objective(trial, estimator_class, param_space_func, static_params_objective,
     try:
         # Используем метрику из static_params_objective, если она задана, иначе используем eval_metric
         model_eval_metric = static_params_objective.get('eval_metric', eval_metric)
-        
+
         # Базовые параметры fit
         fit_kwargs = {
             'eval_set': (X_test, y_test),
@@ -235,16 +235,16 @@ def objective(trial, estimator_class, param_space_func, static_params_objective,
             'mode': metric_mode,
             'pbar': False # Отключаем прогресс бар внутри objective
         }
-        
+
         # Добавляем параметры для fit, которые были извлечены из model_params
         fit_kwargs.update(fit_params)
-        
+
         # Добавляем cat_features если они есть и модель их принимает
         import inspect
         sig = inspect.signature(model.fit)
         if 'cat_features' in sig.parameters and cat_features:
             fit_kwargs['cat_features'] = cat_features
-        
+
         # Фильтруем параметры, которые не поддерживаются методом fit
         supported_params = set(sig.parameters.keys())
         unsupported_params = [k for k in fit_kwargs if k not in supported_params]
@@ -291,10 +291,10 @@ def objective(trial, estimator_class, param_space_func, static_params_objective,
             'auc': 'roc_auc',  # LightGBM -> sklearn
             'roc_auc': 'roc_auc'  # прямое отображение
         }
-        
+
         # Получаем соответствующее имя метрики для sklearn
         sklearn_metric = metric_mapping.get(eval_metric, eval_metric)
-        
+
         if sklearn_metric == 'mae':
             metric_value = mean_absolute_error(y_test, y_pred_output)
         elif sklearn_metric == 'accuracy':

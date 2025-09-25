@@ -19,6 +19,7 @@ common:
         - random_forest
         - lightautoml
         - tabnet
+        - cemlp
 
 split_data:
     test_rate: 0.2

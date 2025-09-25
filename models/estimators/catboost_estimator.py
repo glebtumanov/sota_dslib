@@ -29,7 +29,7 @@ class CatBoostBinary:
     ):
         """
         Инициализация модели CatBoost для бинарной классификации.
-        
+
         Args:
             iterations: Максимальное число итераций (деревьев)
             learning_rate: Скорость обучения
@@ -65,24 +65,24 @@ class CatBoostBinary:
             'verbose': verbose,
             'eval_metric': eval_metric,
         }
-        
+
         # Добавляем условные параметры
         if bootstrap_type in ['Bernoulli', 'Poisson'] and subsample is not None:
             self.params['subsample'] = subsample
         if bootstrap_type == 'Bayesian' and bagging_temperature is not None:
             self.params['bagging_temperature'] = bagging_temperature
-            
+
         # Добавляем остальные параметры из kwargs
         self.params.update(kwargs)
-        
+
         # Модель будет инициализирована в fit
         self.model = None
         self.feature_names = None
-        
+
     def fit(self, X, y, eval_set=None, eval_metric=None, mode=None, cat_features=None, pbar=True):
         """
         Обучение модели CatBoost.
-        
+
         Args:
             X: Матрица признаков для обучения
             y: Целевая переменная
@@ -91,29 +91,29 @@ class CatBoostBinary:
             mode: Режим оптимизации ('min' или 'max'), не используется для CatBoost
             cat_features: Индексы категориальных признаков
             pbar: Отображать ли прогресс-бар (True/False)
-            
+
         Returns:
             self: Обученная модель
         """
         # Сохраняем имена признаков, если X - это DataFrame
         if hasattr(X, 'columns'):
             self.feature_names = list(X.columns)
-        
+
         # Устанавливаем параметр verbose в зависимости от pbar
         self.params['verbose'] = False if not pbar else self.params.get('verbose', False)
-        
+
         # Если передана другая метрика, используем её
         if eval_metric:
             self.params['eval_metric'] = eval_metric
-            
+
         # Инициализируем модель
         self.model = CatBoostClassifier(**self.params)
-        
+
         # Подготовка данных для валидации
         eval_set_data = None
         if eval_set:
             eval_set_data = [eval_set]
-        
+
         # Обучаем модель
         self.model.fit(
             X, y,
@@ -121,39 +121,39 @@ class CatBoostBinary:
             cat_features=cat_features,
             verbose=self.params['verbose']
         )
-        
+
         return self
-    
+
     def predict(self, X, cat_features=None, pbar=None):
         """
         Предсказание вероятностей классов.
-        
+
         Args:
             X: Матрица признаков для предсказания
             cat_features: Индексы категориальных признаков (не используется в predict)
             pbar: Отображать ли прогресс-бар (не используется в predict)
-            
+
         Returns:
             np.ndarray: Предсказанные вероятности класса 1
         """
         if self.model is None:
             raise ValueError("Модель не обучена. Сначала вызовите метод fit.")
-        
+
         return self.model.predict_proba(X)[:, 1]
-    
+
     def predict_proba(self, X, cat_features=None, pbar=None):
         """
         Предсказание вероятностей классов.
-        
+
         Args:
             X: Матрица признаков для предсказания
             cat_features: Индексы категориальных признаков (не используется в predict_proba)
             pbar: Отображать ли прогресс-бар (не используется в predict_proba)
-            
+
         Returns:
             np.ndarray: Предсказанные вероятности всех классов
         """
         if self.model is None:
             raise ValueError("Модель не обучена. Сначала вызовите метод fit.")
-        
-        return self.model.predict_proba(X) 
+
+        return self.model.predict_proba(X)
