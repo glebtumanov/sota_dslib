@@ -92,7 +92,7 @@ class XGBoostBinary:
             eval_set: Кортеж (X_val, y_val) для валидации
             eval_metric: Метрика для оценки (будет использована вместо self.params['eval_metric'])
             mode: Режим оптимизации ('min' или 'max'), не используется для XGBoost
-            cat_features: Индексы категориальных признаков (не используется напрямую в XGBoost)
+            cat_features: Индексы категориальных признаков
             pbar: Отображать ли прогресс-бар (True/False)
 
         Returns:
@@ -120,13 +120,16 @@ class XGBoostBinary:
         eval_set_data = None
         if eval_set:
             eval_set_data = [eval_set]
+            if len(cat_features) > 0:
+                for data in eval_set_data:
+                    data[0][cat_features] = data[0][cat_features].astype('category')
 
         # Получаем early_stopping_rounds
         # early_stopping = self.params.get('early_stopping_rounds', 0)
 
         # Обработка категориальных признаков для XGBoost
-        # Для XGBoost необходимо преобразовать категориальные признаки в one-hot encoding
-        # В данном случае мы предполагаем, что это уже сделано или будет обработано на этапе предобработки
+        if len(cat_features) > 0:
+            X[cat_features] = X[cat_features].astype('category')
 
         # Обучаем модель
         self.model.fit(
@@ -144,7 +147,7 @@ class XGBoostBinary:
 
         Args:
             X: Матрица признаков для предсказания
-            cat_features: Индексы категориальных признаков (не используется в XGBoost)
+            cat_features: Индексы категориальных признаков
             pbar: Отображать ли прогресс-бар (не используется в predict)
 
         Returns:
@@ -152,6 +155,9 @@ class XGBoostBinary:
         """
         if self.model is None:
             raise ValueError("Модель не обучена. Сначала вызовите метод fit.")
+
+        if len(cat_features) > 0:
+            X[cat_features] = X[cat_features].astype('category')
 
         return self.model.predict_proba(X)[:, 1]
 
@@ -161,7 +167,7 @@ class XGBoostBinary:
 
         Args:
             X: Матрица признаков для предсказания
-            cat_features: Индексы категориальных признаков (не используется в XGBoost)
+            cat_features: Индексы категориальных признаков
             pbar: Отображать ли прогресс-бар (не используется в predict_proba)
 
         Returns:
@@ -169,5 +175,8 @@ class XGBoostBinary:
         """
         if self.model is None:
             raise ValueError("Модель не обучена. Сначала вызовите метод fit.")
+
+        if len(cat_features) > 0:
+            X[cat_features] = X[cat_features].astype('category')
 
         return self.model.predict_proba(X)
