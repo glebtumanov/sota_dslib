@@ -10,10 +10,14 @@ class XGBoostModel(BaseModel):
     def __init__(self, task='binary', hp=None, metrics=None, calibrate=None, n_folds=1, main_metric=None,
                  verbose=True, features=[], cat_features=[], target_name=None, index_cols=[]):
         # Вызываем инициализатор базового класса
-        super().__init__(task, hp, metrics, calibrate, n_folds, main_metric, 
+        super().__init__(task, hp, metrics, calibrate, n_folds, main_metric,
                          verbose, features, cat_features, target_name, index_cols)
 
     def _train_fold_binary(self, X_train, y_train, X_test, y_test):
+        if len(self.cat_features) > 0:
+            X_train[self.cat_features] = X_train[self.cat_features].astype('category')
+            X_test[self.cat_features] = X_test[self.cat_features].astype('category')
+            self.hyperparameters['enable_categorical'] = True
         model = XGBClassifier(**self.hyperparameters)
         model.fit(
             X_train,
@@ -24,6 +28,10 @@ class XGBoostModel(BaseModel):
         return model
 
     def _train_fold_multiclass(self, X_train, y_train, X_test, y_test):
+        if len(self.cat_features) > 0:
+            X_train[self.cat_features] = X_train[self.cat_features].astype('category')
+            X_test[self.cat_features] = X_test[self.cat_features].astype('category')
+            self.hyperparameters['enable_categorical'] = True
         model = XGBClassifier(**self.hyperparameters)
         model.fit(
             X_train,
@@ -34,6 +42,10 @@ class XGBoostModel(BaseModel):
         return model
 
     def _train_fold_regression(self, X_train, y_train, X_test, y_test):
+        if len(self.cat_features) > 0:
+            X_train[self.cat_features] = X_train[self.cat_features].astype('category')
+            X_test[self.cat_features] = X_test[self.cat_features].astype('category')
+            self.hyperparameters['enable_categorical'] = True
         model = XGBRegressor(**self.hyperparameters)
         model.fit(
             X_train,
@@ -44,12 +56,18 @@ class XGBoostModel(BaseModel):
         return model
 
     def _predict_fold_binary(self, model, X):
+        if len(self.cat_features) > 0:
+            X[self.cat_features] = X[self.cat_features].astype('category')
         return model.predict_proba(X)[:, 1]
 
     def _predict_fold_multiclass(self, model, X):
+        if len(self.cat_features) > 0:
+            X[self.cat_features] = X[self.cat_features].astype('category')
         return model.predict_proba(X)
 
     def _predict_fold_regression(self, model, X):
+        if len(self.cat_features) > 0:
+            X[self.cat_features] = X[self.cat_features].astype('category')
         return model.predict(X)
 
     def save_model_files(self, save_path: str):
